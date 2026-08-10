@@ -414,19 +414,23 @@
           const originalCursor = textarea.selectionStart;
           let overflowText = '';
           
+          let didOverflow = false;
           while (textarea.scrollHeight > textarea.clientHeight && textarea.value.length > 0) {
             overflowText = textarea.value.slice(-1) + overflowText;
             textarea.value = textarea.value.slice(0, -1);
+            didOverflow = true;
           }
           
-          if (overflowText) {
+          if (didOverflow) {
+            const cursorOverflowed = originalCursor > textarea.value.length;
+            
             let removedNewlines = 0;
             while (overflowText.startsWith('\n')) {
               overflowText = overflowText.substring(1);
               removedNewlines++;
             }
             let adjustedCursor = originalCursor;
-            if (originalCursor > textarea.value.length) {
+            if (cursorOverflowed) {
               adjustedCursor -= removedNewlines;
             }
 
@@ -437,7 +441,7 @@
               answers[currentQ][p] = textarea.value;
               answers[currentQ][p + 1] = nextPageTextarea.value;
               
-              if (adjustedCursor > textarea.value.length) {
+              if (cursorOverflowed) {
                 // Cursor overflowed to the next page
                 nextPageTextarea.focus();
                 const newCursor = adjustedCursor - textarea.value.length;
