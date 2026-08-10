@@ -84,7 +84,7 @@
 
   // Timer
   const countdownTimerEl = document.getElementById('countdownTimer');
-  let secondsRemaining = 4 * 3600 - 1; // 4 hours
+  let secondsRemaining = 3 * 3600 - 1; // 3 hours
 
   // Initialize DB
   function initIndexedDB() {
