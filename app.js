@@ -328,15 +328,31 @@
 
       // Keydown Listener for Enter Key Auto-Number Continuation & Soft Break
       textarea.addEventListener('keydown', function (e) {
-        if (e.key === 'Backspace' && textarea.selectionStart === 0 && textarea.selectionEnd === 0 && p > 1) {
-          e.preventDefault();
-          const prevPage = document.getElementById(`paper-page-${p - 1}`);
-          if (prevPage) {
-            const prevTextarea = prevPage.querySelector('.paper-textarea');
-            prevTextarea.focus();
-            prevTextarea.selectionStart = prevTextarea.selectionEnd = prevTextarea.value.length;
+        if (e.key === 'Backspace' && textarea.selectionStart === textarea.selectionEnd) {
+          if (textarea.selectionStart === 0 && p > 1) {
+            e.preventDefault();
+            const prevPage = document.getElementById(`paper-page-${p - 1}`);
+            if (prevPage) {
+              const prevTextarea = prevPage.querySelector('.paper-textarea');
+              prevTextarea.focus();
+              prevTextarea.selectionStart = prevTextarea.selectionEnd = prevTextarea.value.length;
+            }
+            return;
           }
-          return;
+
+          const details = getActiveLineDetails();
+          if (details) {
+            const { currentLineText, cursorOffsetInLine } = details;
+            const tag = parseLineNumberTag(currentLineText);
+            
+            if (tag && cursorOffsetInLine === tag.rawMatch.length) {
+              e.preventDefault();
+              const shift = -tag.rawMatch.length;
+              const newLineText = currentLineText.substring(tag.rawMatch.length);
+              applyLineChange(details, newLineText, shift);
+              return;
+            }
+          }
         }
 
         if (e.key === 'Enter') {
@@ -901,12 +917,7 @@
 
     activeTextarea.value = val.substring(0, start) + text + val.substring(end);
     
-    // Special handling for brackets （）: place cursor in between
-    if (text === '（）' || text === '「」' || text === '『』') {
-      activeTextarea.selectionStart = activeTextarea.selectionEnd = start + 1;
-    } else {
-      activeTextarea.selectionStart = activeTextarea.selectionEnd = start + text.length;
-    }
+    activeTextarea.selectionStart = activeTextarea.selectionEnd = start + text.length;
 
     // Trigger input event logic
     activeTextarea.dispatchEvent(new Event('input'));
