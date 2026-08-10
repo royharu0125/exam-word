@@ -326,41 +326,134 @@
       textarea.addEventListener('keyup', updateToolbarActiveStates);
       textarea.addEventListener('click', updateToolbarActiveStates);
 
-      // Keydown Listener for Enter Key Auto-Number Continuation
+      // Keydown Listener for Enter Key Auto-Number Continuation & Soft Break
       textarea.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Backspace' && textarea.selectionStart === 0 && textarea.selectionEnd === 0 && p > 1) {
+          e.preventDefault();
+          const prevPage = document.getElementById(`paper-page-${p - 1}`);
+          if (prevPage) {
+            const prevTextarea = prevPage.querySelector('.paper-textarea');
+            prevTextarea.focus();
+            prevTextarea.selectionStart = prevTextarea.selectionEnd = prevTextarea.value.length;
+          }
+          return;
+        }
+
+        if (e.key === 'Enter') {
           const details = getActiveLineDetails();
           if (!details) return;
 
           const { lines, lineIndex, currentLineText } = details;
           const tag = parseLineNumberTag(currentLineText);
 
-          if (tag) {
-            e.preventDefault();
-            const nextTag = generateNumberTag(tag.level, tag.num + 1);
+          if (!e.shiftKey) {
+            // Normal Enter: Auto-generate next tag
+            if (tag) {
+              e.preventDefault();
+              const nextTag = generateNumberTag(tag.level, tag.num + 1);
 
+              const startPos = textarea.selectionStart;
+              const val = textarea.value;
+
+              const beforeCursor = val.substring(0, startPos);
+              const afterCursor = val.substring(startPos);
+
+              const insertedText = '\n' + nextTag;
+              textarea.value = beforeCursor + insertedText + afterCursor;
+
+              const newCursorPos = startPos + insertedText.length;
+              textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+
+              resequenceDocumentNumbers();
+              textarea.dispatchEvent(new Event('input'));
+              updateToolbarActiveStates();
+            }
+          } else {
+            // Shift + Enter: Align to the current line's text start position (Soft break)
+            e.preventDefault();
             const startPos = textarea.selectionStart;
             const val = textarea.value;
 
             const beforeCursor = val.substring(0, startPos);
             const afterCursor = val.substring(startPos);
 
-            const insertedText = '\n' + nextTag;
+            let indentStr = '';
+            if (tag) {
+              // Convert tag characters to spaces (full-width for Chinese/Full-width, half-width for numbers/English)
+              for (let i = 0; i < tag.rawMatch.length; i++) {
+                const char = tag.rawMatch[i];
+                if (char === '　' || char === ' ') {
+                  indentStr += char;
+                } else if (/[一二三四五六七八九十、（）]/.test(char)) {
+                  indentStr += '　';
+                } else {
+                  indentStr += ' '; // half-width space
+                }
+              }
+            } else {
+              // No tag, just match the existing leading spaces of the current line
+              const match = currentLineText.match(/^([　\s]+)/);
+              if (match) {
+                indentStr = match[1];
+              }
+            }
+
+            const insertedText = '\n' + indentStr;
             textarea.value = beforeCursor + insertedText + afterCursor;
 
             const newCursorPos = startPos + insertedText.length;
             textarea.selectionStart = textarea.selectionEnd = newCursorPos;
-
-            resequenceDocumentNumbers(textarea);
             textarea.dispatchEvent(new Event('input'));
-            updateToolbarActiveStates();
           }
         }
       });
 
-      textarea.addEventListener('input', function () {
+      textarea.addEventListener('input', function (e) {
+        // Handle Auto-Jump to Next Page when full
+        if (textarea.clientHeight > 0 && textarea.scrollHeight > textarea.clientHeight && p < 8) {
+          const originalCursor = textarea.selectionStart;
+          let overflowText = '';
+          
+          while (textarea.scrollHeight > textarea.clientHeight && textarea.value.length > 0) {
+            overflowText = textarea.value.slice(-1) + overflowText;
+            textarea.value = textarea.value.slice(0, -1);
+          }
+          
+          if (overflowText) {
+            let removedNewlines = 0;
+            while (overflowText.startsWith('\n')) {
+              overflowText = overflowText.substring(1);
+              removedNewlines++;
+            }
+            let adjustedCursor = originalCursor;
+            if (originalCursor > textarea.value.length) {
+              adjustedCursor -= removedNewlines;
+            }
+
+            const nextPage = document.getElementById(`paper-page-${p + 1}`);
+            if (nextPage) {
+              const nextPageTextarea = nextPage.querySelector('.paper-textarea');
+              nextPageTextarea.value = overflowText + nextPageTextarea.value;
+              answers[currentQ][p] = textarea.value;
+              answers[currentQ][p + 1] = nextPageTextarea.value;
+              
+              if (adjustedCursor > textarea.value.length) {
+                // Cursor overflowed to the next page
+                nextPageTextarea.focus();
+                const newCursor = adjustedCursor - textarea.value.length;
+                nextPageTextarea.selectionStart = nextPageTextarea.selectionEnd = Math.max(0, newCursor);
+              } else {
+                // Cursor is still on this page, restore it
+                textarea.selectionStart = textarea.selectionEnd = adjustedCursor;
+              }
+              // Cascade input event to next page if it also overflowed
+              nextPageTextarea.dispatchEvent(new Event('input'));
+            }
+          }
+        }
+
         answers[currentQ][p] = textarea.value;
-        resequenceDocumentNumbers(textarea);
+        resequenceDocumentNumbers();
         updateStats();
 
         // Debounce Auto-Save
@@ -480,53 +573,61 @@
     };
   }
 
-  function resequenceDocumentNumbers(textarea) {
-    if (!textarea) return;
-
-    const val = textarea.value;
-    const cursorPos = textarea.selectionStart;
-    const lines = val.split('\n');
-
+  function resequenceDocumentNumbers() {
     let levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
-    let changed = false;
-    let newCursorPos = cursorPos;
-    let currentOffset = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const lineText = lines[i];
-      const tag = parseLineNumberTag(lineText);
-
-      if (tag) {
-        levelCounts[tag.level]++;
-
-        // Reset lower sub-levels
-        for (let l = tag.level + 1; l <= 4; l++) {
-          levelCounts[l] = 0;
-        }
-
-        const expectedNum = levelCounts[tag.level];
-        const expectedTag = generateNumberTag(tag.level, expectedNum);
-
-        if (tag.rawMatch !== expectedTag) {
-          const textAfterTag = lineText.substring(tag.rawMatch.length);
-          const newLineText = expectedTag + textAfterTag;
-          const lenDiff = expectedTag.length - tag.rawMatch.length;
-
-          lines[i] = newLineText;
-          changed = true;
-
-          if (cursorPos > currentOffset) {
-            newCursorPos += lenDiff;
+    
+    for (let p = 1; p <= 8; p++) {
+      const page = document.getElementById(`paper-page-${p}`);
+      if (!page) continue;
+      const textarea = page.querySelector('.paper-textarea');
+      if (!textarea) continue;
+      
+      const val = textarea.value;
+      const cursorPos = textarea.selectionStart;
+      const lines = val.split('\n');
+      
+      let changed = false;
+      let newCursorPos = cursorPos;
+      let currentOffset = 0;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const lineText = lines[i];
+        const tag = parseLineNumberTag(lineText);
+        
+        if (tag) {
+          levelCounts[tag.level]++;
+          
+          // Reset lower sub-levels
+          for (let l = tag.level + 1; l <= 4; l++) {
+            levelCounts[l] = 0;
+          }
+          
+          const expectedNum = levelCounts[tag.level];
+          const expectedTag = generateNumberTag(tag.level, expectedNum);
+          
+          if (tag.rawMatch !== expectedTag) {
+            const textAfterTag = lineText.substring(tag.rawMatch.length);
+            const newLineText = expectedTag + textAfterTag;
+            const lenDiff = expectedTag.length - tag.rawMatch.length;
+            
+            lines[i] = newLineText;
+            changed = true;
+            
+            if (cursorPos > currentOffset) {
+              newCursorPos += lenDiff;
+            }
           }
         }
+        currentOffset += lines[i].length + 1;
       }
-
-      currentOffset += lines[i].length + 1;
-    }
-
-    if (changed) {
-      textarea.value = lines.join('\n');
-      textarea.selectionStart = textarea.selectionEnd = Math.max(0, newCursorPos);
+      
+      if (changed) {
+        textarea.value = lines.join('\n');
+        if (textarea === activeTextarea) {
+          textarea.selectionStart = textarea.selectionEnd = Math.max(0, newCursorPos);
+        }
+        answers[currentQ][p] = textarea.value;
+      }
     }
   }
 
@@ -578,7 +679,7 @@
     activeTextarea.selectionStart = target.start;
     activeTextarea.selectionEnd = target.end;
 
-    resequenceDocumentNumbers(activeTextarea);
+    resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
   }
@@ -610,7 +711,7 @@
     activeTextarea.selectionStart = target.start;
     activeTextarea.selectionEnd = target.end;
 
-    resequenceDocumentNumbers(activeTextarea);
+    resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
   }
@@ -628,7 +729,7 @@
     textarea.selectionStart = textarea.selectionEnd = newCursorPos;
 
     // Resequence all list numbers in this paper page
-    resequenceDocumentNumbers(textarea);
+    resequenceDocumentNumbers();
 
     textarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
@@ -797,7 +898,7 @@
     activeTextarea.value = val.substring(0, start) + text + val.substring(end);
     
     // Special handling for brackets （）: place cursor in between
-    if (text === '（）') {
+    if (text === '（）' || text === '「」' || text === '『』') {
       activeTextarea.selectionStart = activeTextarea.selectionEnd = start + 1;
     } else {
       activeTextarea.selectionStart = activeTextarea.selectionEnd = start + text.length;
@@ -1155,33 +1256,45 @@
       
       qParagraphs.push(
         new Paragraph({
-          text: `【第 ${q} 題】`,
-          heading: HeadingLevel.HEADING_2,
+          children: [
+            new TextRun({
+              text: `【第 ${q} 題】`,
+              bold: true
+            })
+          ],
+          outlineLevel: 0,
           spacing: { before: 200, after: 100 }
         })
       );
 
       for (let p = 1; p <= 8; p++) {
-        const pText = (answers[q][p] || '').trim();
+        const pText = (answers[q][p] || '').trimEnd();
         if (pText.length > 0) {
           qHasText = true;
-          qParagraphs.push(
-            new Paragraph({
-              text: `--- 第 ${q} 題 第 ${p} 頁 ---`,
-              bold: true,
-              spacing: { before: 150, after: 80 }
-            }),
-            new Paragraph({
-              children: pText.split('\n').map((line, idx) => {
-                const preservedLine = line.replace(/ /g, '\u00A0');
-                return new TextRun({
-                  text: preservedLine,
-                  break: idx > 0 ? 1 : 0
-                });
-              }),
-              spacing: { after: 200 }
-            })
-          );
+          const lines = pText.split('\n');
+          
+          lines.forEach(line => {
+            const trimmedLine = line.trimEnd();
+            if (trimmedLine.length === 0) {
+              qParagraphs.push(new Paragraph({ children: [] }));
+              return;
+            }
+            
+            const preservedLine = trimmedLine.replace(/ /g, '\u00A0');
+            const tag = parseLineNumberTag(trimmedLine);
+            
+            const pOptions = {
+              children: [
+                new TextRun({ text: preservedLine })
+              ]
+            };
+            
+            if (tag) {
+              pOptions.outlineLevel = tag.level; // level 1-4 becomes outlineLevel 1-4
+            }
+            
+            qParagraphs.push(new Paragraph(pOptions));
+          });
         }
       }
 
@@ -1190,19 +1303,40 @@
       } else {
         children.push(
           new Paragraph({
-            text: `【第 ${q} 題】`,
-            heading: HeadingLevel.HEADING_2,
+            children: [
+              new TextRun({
+                text: `【第 ${q} 題】`,
+                bold: true
+              })
+            ],
+            outlineLevel: 0,
             spacing: { before: 200, after: 100 }
           }),
           new Paragraph({
-            text: '(本題未作答)',
-            spacing: { after: 200 }
+            children: [
+              new TextRun({
+                text: '(本題未作答)'
+              })
+            ]
           })
         );
       }
     });
 
     const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              size: 24, // 12pt = 24 half-points
+              font: "新細明體"
+            },
+            paragraph: {
+              spacing: { after: 0 }
+            }
+          }
+        }
+      },
       sections: [{
         properties: {},
         children: children
