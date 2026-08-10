@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>(練習)國家考試 (司法官、律師第二試) CBT 線上模擬作答系統</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- docx.js for Word Export -->
+  <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+</head>
+
+<body>
+
+  <!-- Top Banner & Candidate Info Bar -->
+  <header class="header-container">
+    <div class="exam-title-banner">
+      <span>考試名稱：司法官、律師考試第二試模擬作答</span>
+      <button class="btn-submit" id="btnFinishExam">結束作答</button>
+    </div>
+    <div class="info-grid">
+      <div class="info-row">
+        <span>類科：各類科</span>
+        <span>姓名：應考人 先生/女士</span>
+        <span>應試座位：A01</span>
+      </div>
+      <div class="info-row">
+        <span>科目：練習科目A</span>
+      </div>
+      <div class="info-row highlight-row">
+        <span>座號：<strong class="text-red">10100001</strong></span>
+        <span>題數：<strong class="text-red" id="totalQuestionsCount">2</strong></span>
+        <span>已作答題數：<strong class="text-red" id="answeredCount">0</strong></span>
+        <span>未作答題數：<strong class="text-red" id="unansweredCount">2</strong></span>
+        <span class="timer-span">離開考試時間：<strong class="text-red" id="countdownTimer">03:59:59</strong> <small
+            class="text-red">(含延長考試時間0分鐘)</small></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Action Control Button Bar -->
+  <nav class="action-bar">
+    <div class="action-left">
+      <button class="btn-gray" id="btnPrevQuestion">【上一題】</button>
+      <button class="btn-gray" id="btnManualSave">【暫存】</button>
+      <button class="btn-gray" id="btnNextQuestion">【下一題】</button>
+      <button class="btn-green" id="btnGuide">操作引導</button>
+      <button class="btn-green" id="btnNotice">作答注意事項</button>
+
+      <span class="question-select-wrap">
+        目前在
+        <select id="selectQuestion">
+          <option value="1">第一題 (50.00分)</option>
+          <option value="2">第二題 (50.00分)</option>
+        </select>
+        <select id="selectPage">
+          <option value="1">第 1 頁</option>
+          <option value="2">第 2 頁</option>
+          <option value="3">第 3 頁</option>
+          <option value="4">第 4 頁</option>
+          <option value="5">第 5 頁</option>
+          <option value="6">第 6 頁</option>
+          <option value="7">第 7 頁</option>
+          <option value="8">第 8 頁</option>
+        </select>
+      </span>
+    </div>
+
+    <!-- Enhanced Features Control -->
+    <div class="action-right">
+      <span class="save-status-badge autosave-badge" id="autoSaveBadge">
+        <span class="status-dot"></span> <span id="autoSaveText">已自動儲存 16:00:00</span>
+      </span>
+      <span class="save-status-badge manualsave-badge" id="manualSaveBadge">
+        <span class="manual-dot">💾</span> <span id="manualSaveText">上次手動暫存：尚無</span>
+      </span>
+      <button class="btn-purple" id="btnPreviewPages">🔍 預覽頁面</button>
+      <button class="btn-blue" id="btnOpenHistory">📜 歷史紀錄</button>
+      <button class="btn-word" id="btnExportWord">📄 匯出 Word 檔</button>
+    </div>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+
+    <!-- Question Section -->
+    <section class="question-container">
+      <div class="question-header">
+        <h2 id="questionTitle">第一題 (50.00分)</h2>
+        <button class="btn-toggle-question" id="btnToggleQuestion">收合試題 ▲</button>
+      </div>
+      <div class="question-body" id="questionBody">
+        <p id="questionContent">
+          若本國僅與 A、B 兩國進行貿易，且本國與兩國的貿易量均相同。若 A 與 B 國的直接匯率為 31.64 與 0.36，請計算本國的名目有效匯率 (nominal effective exchange
+          rate)。請詳述推導過程與法理依據。（完整試題請見紙本試題冊）
+        </p>
+      </div>
+    </section>
+
+    <!-- Punctuation & Formatting Toolbar (Exact MOEX Replica) -->
+    <section class="punctuation-toolbar">
+      <div class="moex-toolbar-inner">
+        <!-- Punctuation Symbols -->
+        <span class="sym-item" data-symbol="，">，</span>
+        <span class="sym-item" data-symbol="。">。</span>
+        <span class="sym-item" data-symbol="、">、</span>
+        <span class="sym-item" data-symbol="；">；</span>
+        <span class="sym-item" data-symbol="：">：</span>
+        <span class="sym-item" data-symbol="！">！</span>
+        <span class="sym-item" data-symbol="？">？</span>
+        <span class="sym-item" data-symbol="—">—</span>
+        <span class="sym-item" data-symbol="〇">〇</span>
+        <span class="sym-item" data-symbol="（）">（）</span>
+        <span class="sym-item" data-symbol="「">「</span>
+        <span class="sym-item" data-symbol="」">」</span>
+        <span class="sym-item" data-symbol="『">『</span>
+        <span class="sym-item" data-symbol="』">』</span>
+        <span class="sym-item" data-symbol="§">§</span>
+        <span class="sym-item" data-symbol="…">…</span>
+
+        <span class="tb-divider">|</span>
+
+        <!-- Edit Tools -->
+        <span class="sym-item tool-icon" id="toolCut" title="剪下">✂</span>
+        <span class="sym-item tool-icon" id="toolCopy" title="複製">📄</span>
+        <span class="sym-item tool-icon" id="toolPaste" title="貼上">📋</span>
+        <span class="sym-item tool-icon" id="toolUndo" title="復原">↶</span>
+        <span class="sym-item tool-icon" id="toolRedo" title="重做">↷</span>
+
+        <span class="tb-divider">|</span>
+
+        <!-- Numbering & Level Tools -->
+        <span class="sym-item tool-icon" id="toolNumbering" title="插入/移除編號清單">12≡</span>
+
+        <span class="tb-divider">|</span>
+
+        <span class="sym-item tool-icon" id="toolPrevLevel" title="上一層">⇤</span>
+        <span class="sym-item tool-icon" id="toolNextLevel" title="下一層">⇥</span>
+      </div>
+    </section>
+
+    <!-- Ruled Answer Paper Canvas / Editor Area -->
+    <section class="answer-paper-wrapper">
+      <div class="paper-pages-container" id="paperPagesContainer">
+        <!-- Dynamic Ruled Pages Generated via JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer Info Bar -->
+  <footer class="footer-bar">
+    <div class="stats-left">
+      <span>目前題號：<strong id="statCurrentQ">第 1 題</strong></span> |
+      <span>總字數：<strong id="statTotalChars">0</strong> 字</span> |
+      <span>總行數：<strong id="statTotalLines">0</strong> 行</span> |
+      <span>頁數：<strong id="statTotalPages">1</strong> 頁</span>
+    </div>
+    <div class="stats-right">
+      <span>考選部 CBT 模擬系統 (司法官、律師二試擬真版)</span>
+    </div>
+  </footer>
+
+  <!-- History Drawer (Slide-over panel) -->
+  <div class="history-overlay" id="historyOverlay"></div>
+  <aside class="history-drawer" id="historyDrawer">
+    <div class="drawer-header">
+      <h3>📜 歷史紀錄與版本控制</h3>
+      <button class="btn-back-to-editor" id="btnBackToEditor">🔙 回到作答區</button>
+      <button class="btn-close-drawer" id="btnCloseHistory">&times;</button>
+    </div>
+
+    <div class="drawer-actions">
+      <button class="btn-small-blue" id="btnCreateSnapshot">📸 建立手動快照 (暫存)</button>
+      <button class="btn-small-red" id="btnClearHistory">🗑️ 清除歷史版本</button>
+    </div>
+
+    <div class="history-layout">
+      <div class="history-list-section">
+        <h4>版本時間軸 (雙擊直接載入)</h4>
+        <div class="history-filter-bar">
+          <button class="history-tab-btn active" data-filter="all">全部</button>
+          <button class="history-tab-btn manual-btn" data-filter="manual">💾 手動暫存</button>
+          <button class="history-tab-btn auto-btn" data-filter="auto">🔄 自動儲存</button>
+        </div>
+        <div class="history-list" id="historyList">
+          <!-- History items injected dynamically -->
+        </div>
+      </div>
+      <div class="history-preview-panel" id="historyPreviewPanel">
+        <h4>版本內容預覽</h4>
+        <div class="preview-timestamp" id="previewTimestamp">請點選左側版本...</div>
+        <div class="preview-q-tabs" id="previewQTabs" style="display: none; padding: 6px 12px; background: #e2e8f0; border-bottom: 1px solid #cbd5e0; gap: 8px;">
+          <button class="history-tab-btn active" data-preview-q="1" style="padding: 4px 12px;">第一題</button>
+          <button class="history-tab-btn" data-preview-q="2" style="padding: 4px 12px;">第二題</button>
+        </div>
+        <div class="preview-content" id="previewContent">（未選擇版本）</div>
+        <div class="preview-actions">
+          <button class="btn-primary-restore" id="btnRestoreVersion" disabled>🚀 載入此版本並回到作答區</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Operation Guide Modal -->
+  <div class="modal-backdrop" id="modalGuide">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>操作引導說明</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <ul>
+          <li><strong>作答方式：</strong> 請點擊試卷橫線劃線區域進行打字輸入。</li>
+          <li><strong>標點符號：</strong> 點擊上方綠色工具列之標點符號按鈕，將自動插入至光標處。</li>
+          <li><strong>題數切換：</strong> 使用「上一題」、「下一題」或下拉選單切換作答題目。</li>
+          <li><strong>自動儲存：</strong> 系統每 3 秒自動將最新內容寫入 IndexedDB 本機儲存，防範關閉與斷線。</li>
+          <li><strong>歷史紀錄：</strong> 點擊右上方「歷史紀錄」可瀏覽過往自動存檔與暫存快照，並一鍵還原。</li>
+          <li><strong>Word 匯出：</strong> 點擊「匯出 Word 檔」即可將完整練習成果連同考卷格式下載為 `.docx` 文件。</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-gray modal-close-btn">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notice Modal -->
+  <div class="modal-backdrop" id="modalNotice">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>作答注意事項</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <ol>
+          <li>請依照題號於作答區依序作答。</li>
+          <li>請注意倒數計時器時間，時間結束將提示交卷。</li>
+          <li>請勿輸入無關考試之文字或符號。</li>
+        </ol>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-gray modal-close-btn">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Pages Preview Modal -->
+  <div class="modal-backdrop preview-modal-backdrop" id="modalPreviewPages">
+    <div class="modal-content preview-modal-content">
+      <div class="modal-header preview-modal-header">
+        <h3 id="previewModalTitle">📖 試卷頁面預覽與快速跳轉</h3>
+        <button class="modal-close" id="btnClosePreviewModal">&times;</button>
+      </div>
+      <div class="preview-toolbar">
+        <div class="preview-stats-summary" id="previewStatsSummary">
+          目前題目：<strong id="previewSummaryQTitle">第一題</strong> | 已作答：<strong id="previewSummaryAnswered">0</strong> / 8 頁 | 本題總字數：<strong id="previewSummaryChars">0</strong> 字
+        </div>
+      </div>
+      <div class="modal-body preview-modal-body">
+        <div class="pages-grid" id="pagesGrid">
+          <!-- Dynamic Page Preview Cards Injected by JS -->
+        </div>
+      </div>
+      <div class="modal-footer preview-modal-footer">
+        <span class="preview-tip-text">💡 提示：點擊任何頁面卡片即可直接跳轉至該頁進行編輯作答</span>
+        <button class="btn-gray modal-close-btn" id="btnClosePreviewModalBtn">關閉預覽</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
