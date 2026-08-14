@@ -591,7 +591,18 @@
         }
       });
 
+      editor.addEventListener('compositionstart', function () {
+        editor.isComposing = true;
+      });
+
+      editor.addEventListener('compositionend', function () {
+        editor.isComposing = false;
+        editor.dispatchEvent(new Event('input'));
+      });
+
       editor.addEventListener('input', function (e) {
+        if (editor.isComposing) return;
+
         if (editor.getAttribute('data-placeholder')) {
           editor.removeAttribute('data-placeholder');
         }
