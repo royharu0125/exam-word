@@ -557,15 +557,20 @@
         }
 
         if (editor.clientHeight > 0 && editor.scrollHeight > editor.clientHeight && p < 8) {
-          const plainText = extractPlainText(editor);
-          if (plainText.length > 0) {
-            let overflowText = plainText.slice(-1);
-            let newText = plainText.slice(0, -1);
-            
-            const caret = getCaretPosition(editor);
-            const isCursorAtEnd = caret && caret.lineIndex === editor.children.length - 1 && caret.offsetWithinLine === editor.children[editor.children.length - 1].textContent.length;
-
-            answers[currentQ][p] = newText;
+          const originalCaret = getCaretPosition(editor);
+          let plainText = extractPlainText(editor);
+          let overflowText = '';
+          let didOverflow = false;
+          
+          while (editor.scrollHeight > editor.clientHeight && plainText.length > 0) {
+            overflowText = plainText.slice(-1) + overflowText;
+            plainText = plainText.slice(0, -1);
+            editor.innerHTML = renderTextToHTML(plainText);
+            didOverflow = true;
+          }
+          
+          if (didOverflow) {
+            answers[currentQ][p] = plainText;
             
             const nextPage = document.getElementById(`paper-page-${p + 1}`);
             if (nextPage) {
@@ -573,15 +578,20 @@
               const nextText = extractPlainText(nextEditor);
               answers[currentQ][p + 1] = overflowText + nextText;
               
-              editor.innerHTML = renderTextToHTML(answers[currentQ][p]);
               nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1]);
               
-              if (isCursorAtEnd) {
+              // Figure out if cursor overflowed to the next page
+              // Since plainText is what remains, if original caret is beyond plainText length, it overflowed
+              // However, since we use lineIndex for caret, a simple heuristic:
+              // if originalCaret lineIndex >= number of lines in editor now, it overflowed!
+              if (originalCaret && originalCaret.lineIndex >= editor.children.length) {
                 nextEditor.focus();
-                setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: 1 });
+                // Move caret to start of next page
+                setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: overflowText.length > 0 ? 1 : 0 });
               } else {
-                if (caret) setCaretPosition(editor, caret);
+                if (originalCaret) setCaretPosition(editor, originalCaret);
               }
+              
               nextEditor.dispatchEvent(new Event('input'));
             }
           }
