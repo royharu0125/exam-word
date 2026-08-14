@@ -293,6 +293,152 @@
     }
   }
 
+  // ==========================================================================
+  // ContentEditable Auto Hanging Indent Helpers
+  // ==========================================================================
+  function getTagIndentWidth(tagStr) {
+    let width = 0;
+    for (let char of tagStr) {
+      if (/[a-zA-Z0-9.\-()]/.test(char) && char !== '（' && char !== '）') {
+        width += (fontSize / 2) + 2;
+      } else {
+        width += fontSize + 2;
+      }
+    }
+    return width;
+  }
+
+  function escapeHTML(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  function renderTextToHTML(text) {
+    if (!text) return '<div class="moex-line"><br></div>';
+    const lines = text.split('\n');
+    return lines.map(line => {
+      const tag = parseLineNumberTag(line);
+      let inlineStyle = '';
+      if (tag) {
+        const w = getTagIndentWidth(tag.rawMatch);
+        inlineStyle = ` style="padding-left: ${w}px; text-indent: -${w}px;"`;
+      }
+      return `<div class="moex-line"${inlineStyle}>${escapeHTML(line) || '<br>'}</div>`;
+    }).join('');
+  }
+
+  function extractPlainText(editor) {
+    const lines = [];
+    for (let child of editor.childNodes) {
+      if (child.nodeName === 'DIV') {
+        lines.push(child.innerText === '\n' ? '' : child.textContent);
+      } else if (child.nodeType === 3) {
+        lines.push(child.textContent);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function getCaretPosition(editor) {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    
+    let node = range.startContainer;
+    let lineDiv = node.nodeType === 3 ? node.parentNode : node;
+    while (lineDiv && !lineDiv.classList?.contains('moex-line') && lineDiv !== editor) {
+      lineDiv = lineDiv.parentNode;
+    }
+    
+    if (!lineDiv || !lineDiv.classList?.contains('moex-line')) return null;
+    
+    const lineIndex = Array.from(editor.children).indexOf(lineDiv);
+    
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(lineDiv);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+    const offsetWithinLine = preCaretRange.toString().length;
+    
+    return { lineIndex, offsetWithinLine };
+  }
+
+  function setCaretPosition(editor, caretPos) {
+    if (!caretPos) return;
+    const { lineIndex, offsetWithinLine } = caretPos;
+    const lineDiv = editor.children[lineIndex];
+    if (!lineDiv) return;
+    
+    const selection = window.getSelection();
+    const range = document.createRange();
+    
+    let currentOffset = 0;
+    let found = false;
+    
+    function traverse(node) {
+      if (found) return;
+      if (node.nodeType === 3) {
+        if (currentOffset + node.length >= offsetWithinLine) {
+          range.setStart(node, offsetWithinLine - currentOffset);
+          range.collapse(true);
+          found = true;
+        } else {
+          currentOffset += node.length;
+        }
+      } else {
+        for (let child of node.childNodes) {
+          traverse(child);
+        }
+      }
+    }
+    
+    traverse(lineDiv);
+    
+    if (!found) {
+      range.selectNodeContents(lineDiv);
+      range.collapse(false);
+    }
+    
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function updateEditorLines(editor) {
+    let changed = false;
+    const newNodes = [];
+    Array.from(editor.childNodes).forEach(child => {
+      if (child.nodeName !== 'DIV') {
+        const div = document.createElement('div');
+        div.className = 'moex-line';
+        div.textContent = child.textContent;
+        editor.replaceChild(div, child);
+        changed = true;
+      } else {
+        if (!child.classList.contains('moex-line')) {
+          child.className = 'moex-line';
+          changed = true;
+        }
+        const text = child.textContent;
+        const tag = parseLineNumberTag(text);
+        if (tag) {
+          const w = getTagIndentWidth(tag.rawMatch);
+          if (child.style.paddingLeft !== `${w}px`) {
+            child.style.paddingLeft = `${w}px`;
+            child.style.textIndent = `-${w}px`;
+            changed = true;
+          }
+        } else {
+          if (child.style.paddingLeft) {
+            child.style.paddingLeft = '';
+            child.style.textIndent = '';
+            changed = true;
+          }
+        }
+      }
+    });
+    return changed;
+  }
+
   // Render 8 Paper Pages per Question
   function renderEditor() {
     paperPagesContainer.innerHTML = '';
@@ -310,46 +456,47 @@
       const centerArea = document.createElement('div');
       centerArea.className = 'paper-center-area';
 
-      const textarea = document.createElement('textarea');
-      textarea.className = 'paper-textarea';
-      textarea.style.fontSize = `${fontSize}px`;
-      textarea.placeholder = p === 1 ? '（請從本頁第 1 行依序開始登記作答內文...）' : '';
-      textarea.value = answers[currentQ][p] || '';
+      const editor = document.createElement('div');
+      editor.className = 'paper-textarea';
+      editor.contentEditable = 'true';
+      editor.style.fontSize = `${fontSize}px`;
+      
+      if (p === 1 && (!answers[currentQ][p] || answers[currentQ][p].trim() === '')) {
+        editor.setAttribute('data-placeholder', '（請從本頁第 1 行依序開始登記作答內文...）');
+      }
+      editor.innerHTML = renderTextToHTML(answers[currentQ][p] || '');
 
-      textarea.addEventListener('focus', function () {
-        activeTextarea = textarea;
+      editor.addEventListener('focus', function () {
+        activeTextarea = editor;
         currentPage = p;
         if (selectPage) selectPage.value = p;
         updateToolbarActiveStates();
       });
 
-      textarea.addEventListener('keyup', updateToolbarActiveStates);
-      textarea.addEventListener('click', updateToolbarActiveStates);
+      editor.addEventListener('keyup', updateToolbarActiveStates);
+      editor.addEventListener('click', updateToolbarActiveStates);
+
+      editor.addEventListener('paste', function(e) {
+        e.preventDefault();
+        const text = (e.originalEvent || e).clipboardData.getData('text/plain');
+        document.execCommand('insertText', false, text);
+      });
 
       // Keydown Listener for Enter Key Auto-Number Continuation & Soft Break
-      textarea.addEventListener('keydown', function (e) {
-        if (e.key === 'Backspace' && textarea.selectionStart === textarea.selectionEnd) {
-          if (textarea.selectionStart === 0 && p > 1) {
-            e.preventDefault();
-            const prevPage = document.getElementById(`paper-page-${p - 1}`);
-            if (prevPage) {
-              const prevTextarea = prevPage.querySelector('.paper-textarea');
-              prevTextarea.focus();
-              prevTextarea.selectionStart = prevTextarea.selectionEnd = prevTextarea.value.length;
-            }
-            return;
-          }
-
-          const details = getActiveLineDetails();
-          if (details) {
-            const { currentLineText, cursorOffsetInLine } = details;
-            const tag = parseLineNumberTag(currentLineText);
-            
-            if (tag && cursorOffsetInLine === tag.rawMatch.length) {
+      editor.addEventListener('keydown', function (e) {
+        if (e.key === 'Backspace') {
+          const caret = getCaretPosition(editor);
+          if (caret && caret.lineIndex === 0 && caret.offsetWithinLine === 0) {
+            if (p > 1) {
               e.preventDefault();
-              const shift = -tag.rawMatch.length;
-              const newLineText = currentLineText.substring(tag.rawMatch.length);
-              applyLineChange(details, newLineText, shift);
+              const prevPage = document.getElementById(`paper-page-${p - 1}`);
+              if (prevPage) {
+                const prevEditor = prevPage.querySelector('.paper-textarea');
+                prevEditor.focus();
+                const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
+                const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
+                setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+              }
               return;
             }
           }
@@ -359,43 +506,24 @@
           const details = getActiveLineDetails();
           if (!details) return;
 
-          const { lines, lineIndex, currentLineText } = details;
+          const { currentLineText } = details;
           const tag = parseLineNumberTag(currentLineText);
 
           if (!e.shiftKey) {
-            // Normal Enter: Auto-generate next tag
             if (tag) {
               e.preventDefault();
               const nextTag = generateNumberTag(tag.level, tag.num + 1);
-
-              const startPos = textarea.selectionStart;
-              const val = textarea.value;
-
-              const beforeCursor = val.substring(0, startPos);
-              const afterCursor = val.substring(startPos);
-
-              const insertedText = '\n' + nextTag;
-              textarea.value = beforeCursor + insertedText + afterCursor;
-
-              const newCursorPos = startPos + insertedText.length;
-              textarea.selectionStart = textarea.selectionEnd = newCursorPos;
-
-              resequenceDocumentNumbers();
-              textarea.dispatchEvent(new Event('input'));
-              updateToolbarActiveStates();
+              document.execCommand('insertText', false, '\n' + nextTag);
+            } else {
+              // let browser do it
+              setTimeout(() => {
+                editor.dispatchEvent(new Event('input'));
+              }, 0);
             }
           } else {
-            // Shift + Enter: Align to the current line's text start position (Soft break)
             e.preventDefault();
-            const startPos = textarea.selectionStart;
-            const val = textarea.value;
-
-            const beforeCursor = val.substring(0, startPos);
-            const afterCursor = val.substring(startPos);
-
             let indentStr = '';
             if (tag) {
-              // Convert tag characters to spaces (full-width for Chinese/Full-width, half-width for numbers/English)
               for (let i = 0; i < tag.rawMatch.length; i++) {
                 const char = tag.rawMatch[i];
                 if (char === '　' || char === ' ') {
@@ -403,80 +531,66 @@
                 } else if (/[一二三四五六七八九十、（）]/.test(char)) {
                   indentStr += '　';
                 } else {
-                  indentStr += ' '; // half-width space
+                  indentStr += ' ';
                 }
               }
             } else {
-              // No tag, just match the existing leading spaces of the current line
               const match = currentLineText.match(/^([　\s]+)/);
               if (match) {
                 indentStr = match[1];
               }
             }
-
-            const insertedText = '\n' + indentStr;
-            textarea.value = beforeCursor + insertedText + afterCursor;
-
-            const newCursorPos = startPos + insertedText.length;
-            textarea.selectionStart = textarea.selectionEnd = newCursorPos;
-            textarea.dispatchEvent(new Event('input'));
+            document.execCommand('insertText', false, '\n' + indentStr);
           }
         }
       });
 
-      textarea.addEventListener('input', function (e) {
-        // Handle Auto-Jump to Next Page when full
-        if (textarea.clientHeight > 0 && textarea.scrollHeight > textarea.clientHeight && p < 8) {
-          const originalCursor = textarea.selectionStart;
-          let overflowText = '';
-          
-          let didOverflow = false;
-          while (textarea.scrollHeight > textarea.clientHeight && textarea.value.length > 0) {
-            overflowText = textarea.value.slice(-1) + overflowText;
-            textarea.value = textarea.value.slice(0, -1);
-            didOverflow = true;
-          }
-          
-          if (didOverflow) {
-            const cursorOverflowed = originalCursor > textarea.value.length;
-            
-            let removedNewlines = 0;
-            while (overflowText.startsWith('\n')) {
-              overflowText = overflowText.substring(1);
-              removedNewlines++;
-            }
-            let adjustedCursor = originalCursor;
-            if (cursorOverflowed) {
-              adjustedCursor -= removedNewlines;
-            }
+      editor.addEventListener('input', function (e) {
+        if (editor.getAttribute('data-placeholder')) {
+          editor.removeAttribute('data-placeholder');
+        }
+        
+        const caretBefore = getCaretPosition(editor);
+        const structureChanged = updateEditorLines(editor);
+        if (structureChanged && caretBefore) {
+          setCaretPosition(editor, caretBefore);
+        }
 
+        if (editor.clientHeight > 0 && editor.scrollHeight > editor.clientHeight && p < 8) {
+          const plainText = extractPlainText(editor);
+          if (plainText.length > 0) {
+            let overflowText = plainText.slice(-1);
+            let newText = plainText.slice(0, -1);
+            
+            const caret = getCaretPosition(editor);
+            const isCursorAtEnd = caret && caret.lineIndex === editor.children.length - 1 && caret.offsetWithinLine === editor.children[editor.children.length - 1].textContent.length;
+
+            answers[currentQ][p] = newText;
+            
             const nextPage = document.getElementById(`paper-page-${p + 1}`);
             if (nextPage) {
-              const nextPageTextarea = nextPage.querySelector('.paper-textarea');
-              nextPageTextarea.value = overflowText + nextPageTextarea.value;
-              answers[currentQ][p] = textarea.value;
-              answers[currentQ][p + 1] = nextPageTextarea.value;
+              const nextEditor = nextPage.querySelector('.paper-textarea');
+              const nextText = extractPlainText(nextEditor);
+              answers[currentQ][p + 1] = overflowText + nextText;
               
-              if (cursorOverflowed) {
-                // Cursor overflowed to the next page
-                nextPageTextarea.focus();
-                const newCursor = adjustedCursor - textarea.value.length;
-                nextPageTextarea.selectionStart = nextPageTextarea.selectionEnd = Math.max(0, newCursor);
+              editor.innerHTML = renderTextToHTML(answers[currentQ][p]);
+              nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1]);
+              
+              if (isCursorAtEnd) {
+                nextEditor.focus();
+                setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: 1 });
               } else {
-                // Cursor is still on this page, restore it
-                textarea.selectionStart = textarea.selectionEnd = adjustedCursor;
+                if (caret) setCaretPosition(editor, caret);
               }
-              // Cascade input event to next page if it also overflowed
-              nextPageTextarea.dispatchEvent(new Event('input'));
+              nextEditor.dispatchEvent(new Event('input'));
             }
           }
         }
 
-        answers[currentQ][p] = textarea.value;
+        answers[currentQ][p] = extractPlainText(editor);
         resequenceDocumentNumbers();
         updateStats();
 
-        // Debounce Auto-Save
         clearTimeout(autoSaveTimer);
         updateAutoSaveStatus('saving');
         autoSaveTimer = setTimeout(() => {
@@ -485,7 +599,7 @@
         }, 2500);
       });
 
-      centerArea.appendChild(textarea);
+      centerArea.appendChild(editor);
 
       const rightMargin = document.createElement('div');
       rightMargin.className = 'paper-right-margin';
@@ -498,9 +612,8 @@
       paperPagesContainer.appendChild(page);
     }
 
-    // Set active textarea to page 1 by default
-    const firstTextarea = paperPagesContainer.querySelector('.paper-textarea');
-    if (firstTextarea) activeTextarea = firstTextarea;
+    const firstEditor = paperPagesContainer.querySelector('.paper-textarea');
+    if (firstEditor) activeTextarea = firstEditor;
 
     questionTitle.textContent = QUESTIONS[currentQ].title;
     questionContent.textContent = QUESTIONS[currentQ].content;
@@ -565,31 +678,20 @@
     }
     if (!activeTextarea) return null;
 
-    const val = activeTextarea.value;
-    const cursorPos = activeTextarea.selectionStart;
+    const caretPos = getCaretPosition(activeTextarea);
+    if (!caretPos) return null;
 
-    const lines = val.split('\n');
-    let currentOffset = 0;
-    let lineIndex = 0;
-    let lineStartOffset = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const lineLen = lines[i].length;
-      if (cursorPos >= currentOffset && cursorPos <= currentOffset + lineLen) {
-        lineIndex = i;
-        lineStartOffset = currentOffset;
-        break;
-      }
-      currentOffset += lineLen + 1; // +1 for newline
-    }
+    const plainText = extractPlainText(activeTextarea);
+    const lines = plainText.split('\n');
+    const lineIndex = caretPos.lineIndex;
 
     return {
       textarea: activeTextarea,
       lines: lines,
       lineIndex: lineIndex,
       currentLineText: lines[lineIndex] || '',
-      lineStartOffset: lineStartOffset,
-      cursorOffsetInLine: cursorPos - lineStartOffset
+      lineStartOffset: 0,
+      cursorOffsetInLine: caretPos.offsetWithinLine
     };
   }
 
@@ -602,13 +704,12 @@
       const textarea = page.querySelector('.paper-textarea');
       if (!textarea) continue;
       
-      const val = textarea.value;
-      const cursorPos = textarea.selectionStart;
+      const val = extractPlainText(textarea);
+      const caretPos = getCaretPosition(textarea);
       const lines = val.split('\n');
       
       let changed = false;
-      let newCursorPos = cursorPos;
-      let currentOffset = 0;
+      let newOffsetWithinLine = caretPos ? caretPos.offsetWithinLine : 0;
       
       for (let i = 0; i < lines.length; i++) {
         const lineText = lines[i];
@@ -617,7 +718,6 @@
         if (tag) {
           levelCounts[tag.level]++;
           
-          // Reset lower sub-levels
           for (let l = tag.level + 1; l <= 4; l++) {
             levelCounts[l] = 0;
           }
@@ -633,20 +733,20 @@
             lines[i] = newLineText;
             changed = true;
             
-            if (cursorPos > currentOffset) {
-              newCursorPos += lenDiff;
+            if (caretPos && caretPos.lineIndex === i) {
+               newOffsetWithinLine += lenDiff;
             }
           }
         }
-        currentOffset += lines[i].length + 1;
       }
       
       if (changed) {
-        textarea.value = lines.join('\n');
-        if (textarea === activeTextarea) {
-          textarea.selectionStart = textarea.selectionEnd = Math.max(0, newCursorPos);
+        const newText = lines.join('\n');
+        textarea.innerHTML = renderTextToHTML(newText);
+        if (textarea === activeTextarea && caretPos) {
+          setCaretPosition(textarea, { lineIndex: caretPos.lineIndex, offsetWithinLine: Math.max(0, newOffsetWithinLine) });
         }
-        answers[currentQ][p] = textarea.value;
+        answers[currentQ][p] = newText;
       }
     }
   }
@@ -665,9 +765,8 @@
 
     singleUndoStep = {
       textarea: activeTextarea,
-      val: activeTextarea.value,
-      start: activeTextarea.selectionStart,
-      end: activeTextarea.selectionEnd
+      val: extractPlainText(activeTextarea),
+      caret: getCaretPosition(activeTextarea)
     };
     singleRedoStep = null;
   }
@@ -685,9 +784,8 @@
 
     singleRedoStep = {
       textarea: activeTextarea,
-      val: activeTextarea.value,
-      start: activeTextarea.selectionStart,
-      end: activeTextarea.selectionEnd
+      val: extractPlainText(activeTextarea),
+      caret: getCaretPosition(activeTextarea)
     };
 
     const target = singleUndoStep;
@@ -695,10 +793,10 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.value = target.val;
-    activeTextarea.selectionStart = target.start;
-    activeTextarea.selectionEnd = target.end;
+    activeTextarea.innerHTML = renderTextToHTML(target.val);
+    setCaretPosition(activeTextarea, target.caret);
 
+    answers[currentQ][currentPage] = target.val;
     resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
@@ -717,9 +815,8 @@
 
     singleUndoStep = {
       textarea: activeTextarea,
-      val: activeTextarea.value,
-      start: activeTextarea.selectionStart,
-      end: activeTextarea.selectionEnd
+      val: extractPlainText(activeTextarea),
+      caret: getCaretPosition(activeTextarea)
     };
 
     const target = singleRedoStep;
@@ -727,10 +824,10 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.value = target.val;
-    activeTextarea.selectionStart = target.start;
-    activeTextarea.selectionEnd = target.end;
+    activeTextarea.innerHTML = renderTextToHTML(target.val);
+    setCaretPosition(activeTextarea, target.caret);
 
+    answers[currentQ][currentPage] = target.val;
     resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
@@ -738,19 +835,18 @@
 
   function applyLineChange(details, newLineText, relativeCursorShift = 0) {
     saveUndoSnapshot();
-    const { textarea, lines, lineIndex, lineStartOffset, cursorOffsetInLine } = details;
+    const { textarea, lines, lineIndex, cursorOffsetInLine } = details;
     
     lines[lineIndex] = newLineText;
-    textarea.value = lines.join('\n');
+    const newText = lines.join('\n');
+    textarea.innerHTML = renderTextToHTML(newText);
+    answers[currentQ][currentPage] = newText;
 
-    // Restore focus and calculate exact new cursor position
     textarea.focus();
-    const newCursorPos = Math.max(0, lineStartOffset + cursorOffsetInLine + relativeCursorShift);
-    textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+    const newOffset = Math.max(0, cursorOffsetInLine + relativeCursorShift);
+    setCaretPosition(textarea, { lineIndex: lineIndex, offsetWithinLine: newOffset });
 
-    // Resequence all list numbers in this paper page
     resequenceDocumentNumbers();
-
     textarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
   }
@@ -911,15 +1007,9 @@
 
     saveUndoSnapshot();
     activeTextarea.focus();
-    const start = activeTextarea.selectionStart;
-    const end = activeTextarea.selectionEnd;
-    const val = activeTextarea.value;
-
-    activeTextarea.value = val.substring(0, start) + text + val.substring(end);
     
-    activeTextarea.selectionStart = activeTextarea.selectionEnd = start + text.length;
-
-    // Trigger input event logic
+    document.execCommand('insertText', false, text);
+    
     activeTextarea.dispatchEvent(new Event('input'));
   }
 

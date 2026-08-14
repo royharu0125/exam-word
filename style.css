@@ -308,6 +308,7 @@ body {
   font-size: 14px;
   color: #2d3748;
   line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 /* ==========================================================================
@@ -319,6 +320,9 @@ body {
   padding: 6px 14px;
   border-radius: 2px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .moex-toolbar-inner {
@@ -459,7 +463,6 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  resize: none;
   font-family: 'Kaiti TC', 'PMingLiU', 'DFKai-SB', 'PingFang TC', serif;
   font-size: 20px;
   line-height: 32px;
@@ -467,6 +470,13 @@ body {
   color: #1a202c;
   box-sizing: border-box;
   letter-spacing: 2px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.moex-line {
+  min-height: 32px;
 }
 
 /* Page Indicator Divider */
