@@ -299,7 +299,7 @@
   function getTagIndentWidth(tagStr) {
     let width = 0;
     for (let char of tagStr) {
-      if (/[a-zA-Z0-9.\-()]/.test(char) && char !== '（' && char !== '）') {
+      if (/[a-zA-Z0-9.\-() ]/.test(char) && char !== '（' && char !== '）' && char !== '　') {
         width += (fontSize / 2) + 2;
       } else {
         width += fontSize + 2;
@@ -314,15 +314,50 @@
     }[tag] || tag));
   }
 
-  function renderTextToHTML(text) {
+  function getInheritedIndent(q, p) {
+    if (p <= 1) return 0;
+    let currentP = p - 1;
+    while (currentP >= 1) {
+      const pText = answers[q][currentP] || '';
+      if (!pText) break;
+      const pLines = pText.split('\n');
+      const lastLine = pLines[pLines.length - 1];
+      
+      const tag = parseLineNumberTag(lastLine);
+      if (tag) {
+        return getTagIndentWidth(tag.rawMatch);
+      }
+      
+      const spaceMatch = lastLine.match(/^([　\s]+)/);
+      if (spaceMatch) {
+        return getTagIndentWidth(spaceMatch[1]);
+      }
+      
+      if (pLines.length > 1) {
+        return 0;
+      }
+      currentP--;
+    }
+    return 0;
+  }
+
+  function renderTextToHTML(text, q, p) {
     if (!text) return '<div class="moex-line"><br></div>';
+    
+    let inheritedIndent = 0;
+    if (q && p) {
+      inheritedIndent = getInheritedIndent(q, p);
+    }
+    
     const lines = text.split('\n');
-    return lines.map(line => {
+    return lines.map((line, index) => {
       const tag = parseLineNumberTag(line);
       let inlineStyle = '';
       if (tag) {
         const w = getTagIndentWidth(tag.rawMatch);
         inlineStyle = ` style="padding-left: ${w}px; text-indent: -${w}px;"`;
+      } else if (index === 0 && inheritedIndent > 0) {
+        inlineStyle = ` style="padding-left: ${inheritedIndent}px;"`;
       }
       return `<div class="moex-line"${inlineStyle}>${escapeHTML(line) || '<br>'}</div>`;
     }).join('');
@@ -403,10 +438,15 @@
     selection.addRange(range);
   }
 
-  function updateEditorLines(editor) {
+  function updateEditorLines(editor, q, p) {
     let changed = false;
+    let inheritedIndent = 0;
+    if (q && p) {
+      inheritedIndent = getInheritedIndent(q, p);
+    }
+
     const newNodes = [];
-    Array.from(editor.childNodes).forEach(child => {
+    Array.from(editor.childNodes).forEach((child, index) => {
       if (child.nodeName !== 'DIV') {
         const div = document.createElement('div');
         div.className = 'moex-line';
@@ -425,6 +465,12 @@
           if (child.style.paddingLeft !== `${w}px`) {
             child.style.paddingLeft = `${w}px`;
             child.style.textIndent = `-${w}px`;
+            changed = true;
+          }
+        } else if (index === 0 && inheritedIndent > 0) {
+          if (child.style.paddingLeft !== `${inheritedIndent}px` || child.style.textIndent !== '') {
+            child.style.paddingLeft = `${inheritedIndent}px`;
+            child.style.textIndent = '';
             changed = true;
           }
         } else {
@@ -464,7 +510,7 @@
       if (p === 1 && (!answers[currentQ][p] || answers[currentQ][p].trim() === '')) {
         editor.setAttribute('data-placeholder', '（請從本頁第 1 行依序開始登記作答內文...）');
       }
-      editor.innerHTML = renderTextToHTML(answers[currentQ][p] || '');
+      editor.innerHTML = renderTextToHTML(answers[currentQ][p] || '', currentQ, p);
 
       editor.addEventListener('focus', function () {
         activeTextarea = editor;
@@ -551,7 +597,7 @@
         }
         
         const caretBefore = getCaretPosition(editor);
-        const structureChanged = updateEditorLines(editor);
+        const structureChanged = updateEditorLines(editor, currentQ, p);
         if (structureChanged && caretBefore) {
           setCaretPosition(editor, caretBefore);
         }
@@ -565,7 +611,7 @@
           while (editor.scrollHeight > editor.clientHeight && plainText.length > 0) {
             overflowText = plainText.slice(-1) + overflowText;
             plainText = plainText.slice(0, -1);
-            editor.innerHTML = renderTextToHTML(plainText);
+            editor.innerHTML = renderTextToHTML(plainText, currentQ, p);
             didOverflow = true;
           }
           
@@ -578,7 +624,7 @@
               const nextText = extractPlainText(nextEditor);
               answers[currentQ][p + 1] = overflowText + nextText;
               
-              nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1]);
+              nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1], currentQ, p + 1);
               
               // Figure out if cursor overflowed to the next page
               // Since plainText is what remains, if original caret is beyond plainText length, it overflowed
@@ -752,7 +798,7 @@
       
       if (changed) {
         const newText = lines.join('\n');
-        textarea.innerHTML = renderTextToHTML(newText);
+        textarea.innerHTML = renderTextToHTML(newText, currentQ, p);
         if (textarea === activeTextarea && caretPos) {
           setCaretPosition(textarea, { lineIndex: caretPos.lineIndex, offsetWithinLine: Math.max(0, newOffsetWithinLine) });
         }
@@ -803,7 +849,7 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.innerHTML = renderTextToHTML(target.val);
+    activeTextarea.innerHTML = renderTextToHTML(target.val, currentQ, currentPage);
     setCaretPosition(activeTextarea, target.caret);
 
     answers[currentQ][currentPage] = target.val;
@@ -834,7 +880,7 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.innerHTML = renderTextToHTML(target.val);
+    activeTextarea.innerHTML = renderTextToHTML(target.val, currentQ, currentPage);
     setCaretPosition(activeTextarea, target.caret);
 
     answers[currentQ][currentPage] = target.val;
@@ -849,7 +895,7 @@
     
     lines[lineIndex] = newLineText;
     const newText = lines.join('\n');
-    textarea.innerHTML = renderTextToHTML(newText);
+    textarea.innerHTML = renderTextToHTML(newText, currentQ, currentPage);
     answers[currentQ][currentPage] = newText;
 
     textarea.focus();
