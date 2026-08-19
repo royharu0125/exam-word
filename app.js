@@ -548,18 +548,94 @@
       editor.addEventListener('keydown', function (e) {
         if (e.key === 'Backspace') {
           const caret = getCaretPosition(editor);
-          if (caret && caret.lineIndex === 0 && caret.offsetWithinLine === 0) {
-            if (p > 1) {
-              e.preventDefault();
-              const prevPage = document.getElementById(`paper-page-${p - 1}`);
-              if (prevPage) {
-                const prevEditor = prevPage.querySelector('.paper-textarea');
-                prevEditor.focus();
-                const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
-                const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
-                setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+          if (caret) {
+            const lineDiv = editor.children[caret.lineIndex];
+            if (lineDiv) {
+              const currentLineText = lineDiv.textContent;
+              const tag = parseLineNumberTag(currentLineText);
+              const spaceMatch = currentLineText.match(/^([　\s]+)/);
+              const prefixLen = tag ? tag.rawMatch.length : (spaceMatch ? spaceMatch[1].length : 0);
+              
+              if (prefixLen > 0 && caret.offsetWithinLine === prefixLen) {
+                e.preventDefault();
+                const selection = window.getSelection();
+                const range = document.createRange();
+                
+                if (caret.lineIndex > 0) {
+                  const prevLineDiv = editor.children[caret.lineIndex - 1];
+                  let prevEndNode = prevLineDiv;
+                  let prevEndOffset = prevLineDiv.childNodes.length;
+                  function findLastTextNode(node) {
+                    if (node.nodeType === 3) return node;
+                    for (let i = node.childNodes.length - 1; i >= 0; i--) {
+                      const textNode = findLastTextNode(node.childNodes[i]);
+                      if (textNode) return textNode;
+                    }
+                    return null;
+                  }
+                  const lastText = findLastTextNode(prevLineDiv);
+                  if (lastText) {
+                    prevEndNode = lastText;
+                    prevEndOffset = lastText.length;
+                  }
+                  range.setStart(prevEndNode, prevEndOffset);
+                } else {
+                  let firstTextNode = lineDiv;
+                  let firstOffset = 0;
+                  function findFirstTextNode(node) {
+                    if (node.nodeType === 3) return node;
+                    for (let i = 0; i < node.childNodes.length; i++) {
+                      const textNode = findFirstTextNode(node.childNodes[i]);
+                      if (textNode) return textNode;
+                    }
+                    return null;
+                  }
+                  const firstText = findFirstTextNode(lineDiv);
+                  if (firstText) {
+                    firstTextNode = firstText;
+                    firstOffset = 0;
+                  }
+                  range.setStart(firstTextNode, firstOffset);
+                }
+                
+                let currentOffset = 0;
+                let endNode = lineDiv;
+                let endNodeOffset = 0;
+                function traverseForEnd(node) {
+                  if (endNode !== lineDiv) return;
+                  if (node.nodeType === 3) {
+                    if (currentOffset + node.length >= prefixLen) {
+                      endNode = node;
+                      endNodeOffset = prefixLen - currentOffset;
+                    }
+                    currentOffset += node.length;
+                  } else {
+                    for (let child of node.childNodes) traverseForEnd(child);
+                  }
+                }
+                traverseForEnd(lineDiv);
+                
+                range.setEnd(endNode, endNodeOffset);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                document.execCommand('delete', false, null);
+                return;
               }
-              return;
+            }
+
+            if (caret.lineIndex === 0 && caret.offsetWithinLine === 0) {
+              if (p > 1) {
+                e.preventDefault();
+                const prevPage = document.getElementById(`paper-page-${p - 1}`);
+                if (prevPage) {
+                  const prevEditor = prevPage.querySelector('.paper-textarea');
+                  prevEditor.focus();
+                  const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
+                  const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
+                  setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                }
+                return;
+              }
             }
           }
         }
@@ -1601,7 +1677,33 @@
         }
       });
       if (confirm(`您目前已完成 ${count} / 2 題。確定要結束作答並交卷嗎？`)) {
-        alert('【成功交卷】感謝使用考選部 CBT 線上模擬作答系統！您可以點擊「匯出 Word 檔」進行備份。');
+        alert('【成功交卷】感謝使用考選部 CBT 線上模擬作答系統！您可以點擊「匯出 Word 檔」進行備份。接下來系統將為您清空並恢復初始狀態。');
+        
+        answers = {
+          1: createEmptyQuestionPages(),
+          2: createEmptyQuestionPages()
+        };
+        currentQ = 1;
+        currentPage = 1;
+        
+        if (selectQuestion) selectQuestion.value = 1;
+        if (selectPage) selectPage.value = 1;
+        
+        renderEditor();
+        updateStats();
+        
+        if (db) {
+          try {
+            const tx = db.transaction(['answers', 'history'], 'readwrite');
+            tx.objectStore('answers').clear();
+            tx.objectStore('history').clear();
+          } catch(e) {
+            console.error(e);
+          }
+        }
+        historyList = [];
+        
+        secondsRemaining = 3 * 3600 - 1;
       }
     });
   }
