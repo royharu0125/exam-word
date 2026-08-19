@@ -356,8 +356,14 @@
       if (tag) {
         const w = getTagIndentWidth(tag.rawMatch);
         inlineStyle = ` style="padding-left: ${w}px; text-indent: -${w}px;"`;
-      } else if (index === 0 && inheritedIndent > 0) {
-        inlineStyle = ` style="padding-left: ${inheritedIndent}px;"`;
+      } else {
+        const spaceMatch = line.match(/^([　\s]+)/);
+        if (spaceMatch) {
+          const w = getTagIndentWidth(spaceMatch[1]);
+          inlineStyle = ` style="padding-left: ${w}px; text-indent: -${w}px;"`;
+        } else if (index === 0 && inheritedIndent > 0) {
+          inlineStyle = ` style="padding-left: ${inheritedIndent}px;"`;
+        }
       }
       return `<div class="moex-line"${inlineStyle}>${escapeHTML(line) || '<br>'}</div>`;
     }).join('');
@@ -467,17 +473,27 @@
             child.style.textIndent = `-${w}px`;
             changed = true;
           }
-        } else if (index === 0 && inheritedIndent > 0) {
-          if (child.style.paddingLeft !== `${inheritedIndent}px` || child.style.textIndent !== '') {
-            child.style.paddingLeft = `${inheritedIndent}px`;
-            child.style.textIndent = '';
-            changed = true;
-          }
         } else {
-          if (child.style.paddingLeft) {
-            child.style.paddingLeft = '';
-            child.style.textIndent = '';
-            changed = true;
+          const spaceMatch = text.match(/^([　\s]+)/);
+          if (spaceMatch) {
+            const w = getTagIndentWidth(spaceMatch[1]);
+            if (child.style.paddingLeft !== `${w}px` || child.style.textIndent !== `-${w}px`) {
+              child.style.paddingLeft = `${w}px`;
+              child.style.textIndent = `-${w}px`;
+              changed = true;
+            }
+          } else if (index === 0 && inheritedIndent > 0) {
+            if (child.style.paddingLeft !== `${inheritedIndent}px` || child.style.textIndent !== '') {
+              child.style.paddingLeft = `${inheritedIndent}px`;
+              child.style.textIndent = '';
+              changed = true;
+            }
+          } else {
+            if (child.style.paddingLeft || child.style.textIndent) {
+              child.style.paddingLeft = '';
+              child.style.textIndent = '';
+              changed = true;
+            }
           }
         }
       }
