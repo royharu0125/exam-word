@@ -546,6 +546,8 @@
 
       // Keydown Listener for Enter Key Auto-Number Continuation & Soft Break
       editor.addEventListener('keydown', function (e) {
+        if (e.isComposing || editor.isComposing) return;
+        
         if (e.key === 'Backspace') {
           const caret = getCaretPosition(editor);
           if (caret) {
