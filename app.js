@@ -1597,7 +1597,19 @@
             };
             
             if (tag) {
-              pOptions.outlineLevel = tag.level; // level 1-4 becomes outlineLevel 1-4
+              pOptions.outlineLevel = tag.level;
+              
+              // Calculate hanging indent width based on tag.rawMatch
+              // Full-width char = 240 twips, Half-width char = 120 twips (12pt font)
+              let indentTwips = 0;
+              for (let i = 0; i < tag.rawMatch.length; i++) {
+                if (tag.rawMatch.charCodeAt(i) > 255) {
+                  indentTwips += 240;
+                } else {
+                  indentTwips += 120;
+                }
+              }
+              pOptions.indent = { left: indentTwips, hanging: indentTwips };
             }
             
             qParagraphs.push(new Paragraph(pOptions));
