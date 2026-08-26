@@ -548,6 +548,22 @@
       editor.addEventListener('keydown', function (e) {
         if (e.isComposing || editor.isComposing) return;
         
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          const details = getActiveLineDetails();
+          if (details) {
+            const tag = parseLineNumberTag(details.currentLineText);
+            if (tag) {
+              changeHierarchyLevel(e.shiftKey ? -1 : 1);
+            } else {
+              if (!e.shiftKey) {
+                document.execCommand('insertText', false, '　　');
+              }
+            }
+          }
+          return;
+        }
+
         if (e.key === 'Backspace') {
           const caret = getCaretPosition(editor);
           if (caret) {
@@ -799,37 +815,63 @@
     return CHINESE_NUMS[num - 1] || String(num);
   }
 
+  function fullWidthToHalf(str) {
+    return str.replace(/[０-９Ａ-Ｚａ-ｚ]/g, function(s) {
+      return String.fromCharCode(s.charCodeAt(0) - 0xfee0);
+    });
+  }
+
   function parseLineNumberTag(lineText) {
-    // Level 1: 一、 二、 三、
-    let match = lineText.match(/^(\s*)([一二三四五六七八九十]+)、/);
+    let match;
+    // Level 1: (一) or （一）
+    match = lineText.match(/^([　\s]*)(?:\(|（)([一二三四五六七八九十]+)(?:\)|）)/);
+    if (match) return { level: 1, num: chineseToNum(match[2]), rawMatch: match[0], indent: match[1] };
+    
+    // Level 2: 1. or １.
+    match = lineText.match(/^([　\s]*)([0-9０-９]+)(?:\.|．)/);
+    if (match) return { level: 2, num: parseInt(fullWidthToHalf(match[2]), 10), rawMatch: match[0], indent: match[1] };
+    
+    // Level 3: (1) or （1） or （１）
+    match = lineText.match(/^([　\s]*)(?:\(|（)([0-9０-９]+)(?:\)|）)/);
+    if (match) return { level: 3, num: parseInt(fullWidthToHalf(match[2]), 10), rawMatch: match[0], indent: match[1] };
+    
+    // Level 4: A. or Ａ.
+    match = lineText.match(/^([　\s]*)([A-ZＡ-Ｚ])(?:\.|．)/);
     if (match) {
-      return { level: 1, num: chineseToNum(match[2]), rawMatch: match[0], indent: match[1] };
+      const charCode = fullWidthToHalf(match[2]).charCodeAt(0);
+      return { level: 4, num: charCode - 64, rawMatch: match[0], indent: match[1] };
     }
-    // Level 2: （一） （二）
-    match = lineText.match(/^(\s*)（([一二三四五六七八九十]+)）/);
+    
+    // Level 5: a. or ａ.
+    match = lineText.match(/^([　\s]*)([a-zａ-ｚ])(?:\.|．)/);
     if (match) {
-      return { level: 2, num: chineseToNum(match[2]), rawMatch: match[0], indent: match[1] };
+      const charCode = fullWidthToHalf(match[2]).charCodeAt(0);
+      return { level: 5, num: charCode - 96, rawMatch: match[0], indent: match[1] };
     }
-    // Level 3: 1. 2. 3.
-    match = lineText.match(/^(\s*)(\d+)\./);
+    
+    // Level 6: (a) or （a） or （ａ）
+    match = lineText.match(/^([　\s]*)(?:\(|（)([a-zａ-ｚ])(?:\)|）)/);
     if (match) {
-      return { level: 3, num: parseInt(match[2], 10), rawMatch: match[0], indent: match[1] };
+      const charCode = fullWidthToHalf(match[2]).charCodeAt(0);
+      return { level: 6, num: charCode - 96, rawMatch: match[0], indent: match[1] };
     }
-    // Level 4: (1) (2)
-    match = lineText.match(/^(\s*)\((\d+)\)/);
-    if (match) {
-      return { level: 4, num: parseInt(match[2], 10), rawMatch: match[0], indent: match[1] };
-    }
+
+    // Fallback for previous Level 1: 一、
+    match = lineText.match(/^([　\s]*)([一二三四五六七八九十]+)、/);
+    if (match) return { level: 1, num: chineseToNum(match[2]), rawMatch: match[0], indent: match[1] };
+
     return null;
   }
 
   function generateNumberTag(level, num) {
     switch (level) {
-      case 1: return `${numToChinese(num)}、`;
-      case 2: return `　　（${numToChinese(num)}）`;
-      case 3: return `　　　　${num}.`;
-      case 4: return `　　　　　　(${num})`;
-      default: return `${numToChinese(num)}、`;
+      case 1: return `(${numToChinese(num)})`;
+      case 2: return `　　${num}.`;
+      case 3: return `　　　　(${num})`;
+      case 4: return `　　　　　　${String.fromCharCode(num + 64)}.`;
+      case 5: return `　　　　　　　　${String.fromCharCode(num + 96)}.`;
+      case 6: return `　　　　　　　　　　(${String.fromCharCode(num + 96)})`;
+      default: return `(${numToChinese(num)})`;
     }
   }
 
@@ -857,7 +899,7 @@
   }
 
   function resequenceDocumentNumbers() {
-    let levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    let levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
     
     for (let p = 1; p <= 8; p++) {
       const page = document.getElementById(`paper-page-${p}`);
@@ -879,7 +921,7 @@
         if (tag) {
           levelCounts[tag.level]++;
           
-          for (let l = tag.level + 1; l <= 4; l++) {
+          for (let l = tag.level + 1; l <= 6; l++) {
             levelCounts[l] = 0;
           }
           
@@ -913,10 +955,10 @@
   }
 
   // ==========================================================================
-  // Single-Step Undo/Redo Engine (復原與取消復原僅限 1 個步驟)
+  // Multi-Step Undo/Redo Engine (提供 4 次編輯還原機會)
   // ==========================================================================
-  let singleUndoStep = null;
-  let singleRedoStep = null;
+  let undoStack = [];
+  let redoStack = [];
 
   function saveUndoSnapshot() {
     if (!activeTextarea && paperPagesContainer) {
@@ -924,12 +966,13 @@
     }
     if (!activeTextarea) return;
 
-    singleUndoStep = {
+    undoStack.push({
       textarea: activeTextarea,
       val: extractPlainText(activeTextarea),
       caret: getCaretPosition(activeTextarea)
-    };
-    singleRedoStep = null;
+    });
+    if (undoStack.length > 4) undoStack.shift();
+    redoStack = [];
   }
 
   function performUndo() {
@@ -938,19 +981,18 @@
     }
     if (!activeTextarea) return;
 
-    if (!singleUndoStep) {
+    if (undoStack.length === 0) {
       document.execCommand('undo');
       return;
     }
 
-    singleRedoStep = {
+    redoStack.push({
       textarea: activeTextarea,
       val: extractPlainText(activeTextarea),
       caret: getCaretPosition(activeTextarea)
-    };
+    });
 
-    const target = singleUndoStep;
-    singleUndoStep = null;
+    const target = undoStack.pop();
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
@@ -969,19 +1011,18 @@
     }
     if (!activeTextarea) return;
 
-    if (!singleRedoStep) {
+    if (redoStack.length === 0) {
       document.execCommand('redo');
       return;
     }
 
-    singleUndoStep = {
+    undoStack.push({
       textarea: activeTextarea,
       val: extractPlainText(activeTextarea),
       caret: getCaretPosition(activeTextarea)
-    };
+    });
 
-    const target = singleRedoStep;
-    singleRedoStep = null;
+    const target = redoStack.pop();
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
@@ -1059,7 +1100,7 @@
 
     let newLevel = existingTag.level + direction;
     if (newLevel < 1) newLevel = 1;
-    if (newLevel > 4) newLevel = 4;
+    if (newLevel > 6) newLevel = 6;
 
     const newTag = generateNumberTag(newLevel, 1);
     const newLineText = currentLineText.replace(existingTag.rawMatch, newTag);
