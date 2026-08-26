@@ -647,10 +647,26 @@
                 const prevPage = document.getElementById(`paper-page-${p - 1}`);
                 if (prevPage) {
                   const prevEditor = prevPage.querySelector('.paper-textarea');
-                  prevEditor.focus();
-                  const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
-                  const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
-                  setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                  let prevText = extractPlainText(prevEditor);
+                  
+                  if (prevText.endsWith('\n')) {
+                    prevText = prevText.slice(0, -1);
+                    prevEditor.innerHTML = renderTextToHTML(prevText, currentQ, p - 1);
+                    answers[currentQ][p - 1] = prevText;
+                    
+                    prevEditor.focus();
+                    const lines = prevText.split('\n');
+                    const lastLine = lines.length > 0 ? lines.length - 1 : 0;
+                    const lastOffset = lines[lastLine] ? lines[lastLine].length : 0;
+                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                    
+                    prevEditor.dispatchEvent(new Event('input'));
+                  } else {
+                    prevEditor.focus();
+                    const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
+                    const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
+                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                  }
                 }
                 return;
               }
@@ -747,19 +763,59 @@
               
               nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1], currentQ, p + 1);
               
-              // Figure out if cursor overflowed to the next page
-              // Since plainText is what remains, if original caret is beyond plainText length, it overflowed
-              // However, since we use lineIndex for caret, a simple heuristic:
-              // if originalCaret lineIndex >= number of lines in editor now, it overflowed!
               if (originalCaret && originalCaret.lineIndex >= editor.children.length) {
                 nextEditor.focus();
-                // Move caret to start of next page
                 setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: overflowText.length > 0 ? 1 : 0 });
               } else {
                 if (originalCaret) setCaretPosition(editor, originalCaret);
               }
               
               nextEditor.dispatchEvent(new Event('input'));
+            }
+          }
+        } else if (editor.clientHeight > 0 && editor.scrollHeight <= editor.clientHeight && p < 8) {
+          const nextPage = document.getElementById(`paper-page-${p + 1}`);
+          if (nextPage) {
+            const nextEditor = nextPage.querySelector('.paper-textarea');
+            let nextText = extractPlainText(nextEditor);
+            
+            if (nextText.length > 0) {
+              let currentText = extractPlainText(editor);
+              const originalCaret = getCaretPosition(editor);
+              
+              let low = 1;
+              let high = nextText.length;
+              let best = 0;
+              
+              while (low <= high) {
+                let mid = Math.floor((low + high) / 2);
+                let testText = currentText + nextText.substring(0, mid);
+                editor.innerHTML = renderTextToHTML(testText, currentQ, p);
+                if (editor.scrollHeight <= editor.clientHeight) {
+                  best = mid;
+                  low = mid + 1;
+                } else {
+                  high = mid - 1;
+                }
+              }
+              
+              if (best > 0) {
+                let pulledText = nextText.substring(0, best);
+                nextText = nextText.substring(best);
+                
+                editor.innerHTML = renderTextToHTML(currentText + pulledText, currentQ, p);
+                nextEditor.innerHTML = renderTextToHTML(nextText, currentQ, p + 1);
+                
+                answers[currentQ][p] = currentText + pulledText;
+                answers[currentQ][p + 1] = nextText;
+                
+                if (originalCaret) setCaretPosition(editor, originalCaret);
+                
+                nextEditor.dispatchEvent(new Event('input'));
+              } else {
+                editor.innerHTML = renderTextToHTML(currentText, currentQ, p);
+                if (originalCaret) setCaretPosition(editor, originalCaret);
+              }
             }
           }
         }
