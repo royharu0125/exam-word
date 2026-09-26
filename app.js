@@ -1646,27 +1646,41 @@
             const preservedLine = trimmedLine.replace(/ /g, '\u00A0');
             const tag = parseLineNumberTag(trimmedLine);
             
-            const pOptions = {
-              children: [
-                new TextRun({ text: preservedLine })
-              ]
-            };
+            let textToRender = preservedLine;
+            const pOptions = {};
             
             if (tag) {
               pOptions.outlineLevel = tag.level;
               
-              // Calculate hanging indent width based on tag.rawMatch
-              // Full-width char = 240 twips, Half-width char = 120 twips (12pt font)
-              let indentTwips = 0;
-              for (let i = 0; i < tag.rawMatch.length; i++) {
-                if (tag.rawMatch.charCodeAt(i) > 255) {
-                  indentTwips += 240;
-                } else {
-                  indentTwips += 120;
-                }
+              const indentSpaces = tag.indent;
+              const tagContent = tag.rawMatch.substring(indentSpaces.length);
+              
+              let indentSpaceTwips = 0;
+              for (let i = 0; i < indentSpaces.length; i++) {
+                indentSpaceTwips += (indentSpaces.charCodeAt(i) > 255) ? 240 : 120;
               }
-              pOptions.indent = { left: indentTwips, hanging: indentTwips };
+              
+              let tagTwips = 0;
+              for (let i = 0; i < tagContent.length; i++) {
+                tagTwips += (tagContent.charCodeAt(i) > 255) ? 240 : 120;
+              }
+              
+              pOptions.indent = { left: indentSpaceTwips + tagTwips, hanging: tagTwips };
+              textToRender = preservedLine.substring(indentSpaces.length);
+            } else {
+              const spaceMatch = trimmedLine.match(/^([　\s]+)/);
+              if (spaceMatch) {
+                const indentSpaces = spaceMatch[1];
+                let indentSpaceTwips = 0;
+                for (let i = 0; i < indentSpaces.length; i++) {
+                  indentSpaceTwips += (indentSpaces.charCodeAt(i) > 255) ? 240 : 120;
+                }
+                pOptions.indent = { left: indentSpaceTwips };
+                textToRender = preservedLine.substring(indentSpaces.length);
+              }
             }
+            
+            pOptions.children = [new TextRun({ text: textToRender })];
             
             qParagraphs.push(new Paragraph(pOptions));
           });
