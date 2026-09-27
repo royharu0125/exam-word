@@ -30,7 +30,15 @@ body {
   color: var(--text-color);
   line-height: 1.5;
   user-select: none;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-scroll-wrapper {
+  flex: 1;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
