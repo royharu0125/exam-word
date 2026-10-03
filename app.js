@@ -397,13 +397,22 @@
     
     let node = range.startContainer;
     let lineDiv = node.nodeType === 3 ? node.parentNode : node;
-    while (lineDiv && !lineDiv.classList?.contains('moex-line') && lineDiv !== editor) {
+    
+    while (lineDiv && lineDiv.parentNode !== editor && lineDiv !== editor) {
       lineDiv = lineDiv.parentNode;
     }
     
-    if (!lineDiv || !lineDiv.classList?.contains('moex-line')) return null;
+    if (!lineDiv) return null;
+    if (lineDiv === editor) {
+      if (editor.childNodes.length > 0) {
+        lineDiv = editor.childNodes[0];
+      } else {
+        return { lineIndex: 0, offsetWithinLine: 0 };
+      }
+    }
     
-    const lineIndex = Array.from(editor.children).indexOf(lineDiv);
+    const lineIndex = Array.from(editor.childNodes).indexOf(lineDiv);
+    if (lineIndex === -1) return null;
     
     const preCaretRange = range.cloneRange();
     preCaretRange.selectNodeContents(lineDiv);
@@ -754,56 +763,53 @@
   function resequenceDocumentNumbers() {
     let levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
     
-    for (let p = 1; p <= 8; p++) {
-      const page = document.getElementById(`paper-page-${p}`);
-      if (!page) continue;
-      const textarea = page.querySelector('.paper-textarea');
-      if (!textarea) continue;
+    const textarea = paperPagesContainer.querySelector('.single-editor');
+    if (!textarea) return;
+    
+    const val = extractPlainText(textarea);
+    const caretPos = getCaretPosition(textarea);
+    const lines = val.split('\n');
+    
+    let changed = false;
+    let newOffsetWithinLine = caretPos ? caretPos.offsetWithinLine : 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const lineText = lines[i];
+      const tag = parseLineNumberTag(lineText);
       
-      const val = extractPlainText(textarea);
-      const caretPos = getCaretPosition(textarea);
-      const lines = val.split('\n');
-      
-      let changed = false;
-      let newOffsetWithinLine = caretPos ? caretPos.offsetWithinLine : 0;
-      
-      for (let i = 0; i < lines.length; i++) {
-        const lineText = lines[i];
-        const tag = parseLineNumberTag(lineText);
+      if (tag) {
+        levelCounts[tag.level]++;
         
-        if (tag) {
-          levelCounts[tag.level]++;
+        for (let l = tag.level + 1; l <= 6; l++) {
+          levelCounts[l] = 0;
+        }
+        
+        const expectedNum = levelCounts[tag.level];
+        const expectedTag = generateNumberTag(tag.level, expectedNum);
+        
+        if (tag.rawMatch !== expectedTag) {
+          const textAfterTag = lineText.substring(tag.rawMatch.length);
+          const newLineText = expectedTag + textAfterTag;
+          const lenDiff = expectedTag.length - tag.rawMatch.length;
           
-          for (let l = tag.level + 1; l <= 6; l++) {
-            levelCounts[l] = 0;
-          }
+          lines[i] = newLineText;
+          changed = true;
           
-          const expectedNum = levelCounts[tag.level];
-          const expectedTag = generateNumberTag(tag.level, expectedNum);
-          
-          if (tag.rawMatch !== expectedTag) {
-            const textAfterTag = lineText.substring(tag.rawMatch.length);
-            const newLineText = expectedTag + textAfterTag;
-            const lenDiff = expectedTag.length - tag.rawMatch.length;
-            
-            lines[i] = newLineText;
-            changed = true;
-            
-            if (caretPos && caretPos.lineIndex === i) {
-               newOffsetWithinLine += lenDiff;
-            }
+          if (caretPos && caretPos.lineIndex === i) {
+             newOffsetWithinLine += lenDiff;
           }
         }
       }
-      
-      if (changed) {
-        const newText = lines.join('\n');
-        textarea.innerHTML = renderTextToHTML(newText, currentQ, p);
-        if (textarea === activeTextarea && caretPos) {
-          setCaretPosition(textarea, { lineIndex: caretPos.lineIndex, offsetWithinLine: Math.max(0, newOffsetWithinLine) });
-        }
-        answers[currentQ][p] = newText;
+    }
+    
+    if (changed) {
+      const newText = lines.join('\n');
+      textarea.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+      applyHangingIndents(textarea);
+      if (textarea === activeTextarea && caretPos) {
+        setCaretPosition(textarea, { lineIndex: caretPos.lineIndex, offsetWithinLine: Math.max(0, newOffsetWithinLine) });
       }
+      answers[currentQ][1] = newText;
     }
   }
 
@@ -849,10 +855,11 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.innerHTML = renderTextToHTML(target.val, currentQ, currentPage);
+    activeTextarea.innerHTML = target.val.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+    applyHangingIndents(activeTextarea);
     setCaretPosition(activeTextarea, target.caret);
 
-    answers[currentQ][currentPage] = target.val;
+    answers[currentQ][1] = target.val;
     resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
@@ -879,10 +886,11 @@
 
     activeTextarea = target.textarea;
     activeTextarea.focus();
-    activeTextarea.innerHTML = renderTextToHTML(target.val, currentQ, currentPage);
+    activeTextarea.innerHTML = target.val.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+    applyHangingIndents(activeTextarea);
     setCaretPosition(activeTextarea, target.caret);
 
-    answers[currentQ][currentPage] = target.val;
+    answers[currentQ][1] = target.val;
     resequenceDocumentNumbers();
     activeTextarea.dispatchEvent(new Event('input'));
     updateToolbarActiveStates();
@@ -894,8 +902,9 @@
     
     lines[lineIndex] = newLineText;
     const newText = lines.join('\n');
-    textarea.innerHTML = renderTextToHTML(newText, currentQ, currentPage);
-    answers[currentQ][currentPage] = newText;
+    textarea.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+    applyHangingIndents(textarea);
+    answers[currentQ][1] = newText;
 
     textarea.focus();
     const newOffset = Math.max(0, cursorOffsetInLine + relativeCursorShift);
