@@ -593,21 +593,27 @@
     editor.addEventListener('click', updateToolbarActiveStates);
 
     // Word-like Enter: auto-continue numbered list
+    // Word-like Backspace: remove entire tag at once
+    // Word-like cursor: snap cursor to after tag (tag is not editable)
     editor.addEventListener('keydown', function (e) {
+
+      // === ENTER ===
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         const details = getActiveLineDetails();
-        if (!details) return; // let browser handle normally
+        if (!details) return;
 
-        const { lines, lineIndex, currentLineText } = details;
+        const { lines, lineIndex, currentLineText, cursorOffsetInLine } = details;
         const tag = parseLineNumberTag(currentLineText);
         if (!tag) return; // not a numbered line, let browser handle normally
 
         e.preventDefault();
 
-        // If the line is ONLY the tag (no real content after it), remove the tag (like Word)
+        const textBeforeCursor = currentLineText.substring(0, cursorOffsetInLine);
+        const textAfterCursor = currentLineText.substring(cursorOffsetInLine);
+
+        // If the line is ONLY the tag (no content), remove the tag (like Word)
         const contentAfterTag = currentLineText.substring(tag.rawMatch.length).trim();
         if (!contentAfterTag) {
-          // Remove the tag, leave an empty line
           const newLines = [...lines];
           newLines[lineIndex] = '';
           const newText = newLines.join('\n');
@@ -620,23 +626,64 @@
           return;
         }
 
-        // Generate the next number tag at the same level
         const nextTag = generateNumberTag(tag.level, tag.num + 1);
 
-        // Insert a new line after current line with the next tag
         const newLines = [...lines];
-        newLines.splice(lineIndex + 1, 0, nextTag);
+        newLines[lineIndex] = textBeforeCursor;
+        newLines.splice(lineIndex + 1, 0, nextTag + textAfterCursor);
         const newText = newLines.join('\n');
         editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
         applyHangingIndents(editor);
         answers[currentQ][1] = newText;
 
-        // Place cursor at end of the new tag
         editor.focus();
         setCaretPosition(editor, { lineIndex: lineIndex + 1, offsetWithinLine: nextTag.length });
 
         resequenceDocumentNumbers();
         editor.dispatchEvent(new Event('input'));
+        return;
+      }
+
+      // === BACKSPACE: remove entire tag at once when cursor is at/within tag ===
+      if (e.key === 'Backspace' && !e.isComposing) {
+        const details = getActiveLineDetails();
+        if (!details) return;
+
+        const { lines, lineIndex, currentLineText, cursorOffsetInLine } = details;
+        const tag = parseLineNumberTag(currentLineText);
+        if (!tag) return; // not a numbered line, let browser handle normally
+
+        // If cursor is at or before the end of the tag, remove the whole tag
+        if (cursorOffsetInLine <= tag.rawMatch.length) {
+          e.preventDefault();
+          const textAfterTag = currentLineText.substring(tag.rawMatch.length);
+          const newLines = [...lines];
+          newLines[lineIndex] = textAfterTag;
+          const newText = newLines.join('\n');
+          editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+          applyHangingIndents(editor);
+          answers[currentQ][1] = newText;
+          editor.focus();
+          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+          resequenceDocumentNumbers();
+          editor.dispatchEvent(new Event('input'));
+          return;
+        }
+        // If cursor is after the tag, let browser handle normally (delete one char)
+        return;
+      }
+
+      // === Arrow Left / Home: snap cursor to after tag (don't let cursor enter tag) ===
+      if (e.key === 'ArrowLeft' || e.key === 'Home') {
+        setTimeout(() => {
+          const details = getActiveLineDetails();
+          if (!details) return;
+          const { lineIndex, currentLineText, cursorOffsetInLine } = details;
+          const tag = parseLineNumberTag(currentLineText);
+          if (tag && cursorOffsetInLine > 0 && cursorOffsetInLine < tag.rawMatch.length) {
+            setCaretPosition(editor, { lineIndex, offsetWithinLine: tag.rawMatch.length });
+          }
+        }, 0);
       }
     });
     editor.addEventListener('paste', function(e) {
