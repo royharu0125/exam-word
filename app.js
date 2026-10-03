@@ -591,6 +591,54 @@
 
     editor.addEventListener('keyup', updateToolbarActiveStates);
     editor.addEventListener('click', updateToolbarActiveStates);
+
+    // Word-like Enter: auto-continue numbered list
+    editor.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        const details = getActiveLineDetails();
+        if (!details) return; // let browser handle normally
+
+        const { lines, lineIndex, currentLineText } = details;
+        const tag = parseLineNumberTag(currentLineText);
+        if (!tag) return; // not a numbered line, let browser handle normally
+
+        e.preventDefault();
+
+        // If the line is ONLY the tag (no real content after it), remove the tag (like Word)
+        const contentAfterTag = currentLineText.substring(tag.rawMatch.length).trim();
+        if (!contentAfterTag) {
+          // Remove the tag, leave an empty line
+          const newLines = [...lines];
+          newLines[lineIndex] = '';
+          const newText = newLines.join('\n');
+          editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+          applyHangingIndents(editor);
+          answers[currentQ][1] = newText;
+          editor.focus();
+          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+          editor.dispatchEvent(new Event('input'));
+          return;
+        }
+
+        // Generate the next number tag at the same level
+        const nextTag = generateNumberTag(tag.level, tag.num + 1);
+
+        // Insert a new line after current line with the next tag
+        const newLines = [...lines];
+        newLines.splice(lineIndex + 1, 0, nextTag);
+        const newText = newLines.join('\n');
+        editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+        applyHangingIndents(editor);
+        answers[currentQ][1] = newText;
+
+        // Place cursor at end of the new tag
+        editor.focus();
+        setCaretPosition(editor, { lineIndex: lineIndex + 1, offsetWithinLine: nextTag.length });
+
+        resequenceDocumentNumbers();
+        editor.dispatchEvent(new Event('input'));
+      }
+    });
     editor.addEventListener('paste', function(e) {
       e.preventDefault();
       const text = (e.originalEvent || e).clipboardData.getData('text/plain');
