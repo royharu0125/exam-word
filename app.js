@@ -11,11 +11,15 @@
   const QUESTIONS = {
     1: {
       title: '第一題 (50.00分)',
-      content: '範例題目僅供參考'
+      content: '若本國僅與 A、B 兩國進行貿易，且本國與兩國的貿易量均相同。若 A 與 B 國的直接匯率為 31.64 與 0.36，請計算本國的名目有效匯率 (nominal effective exchange rate)。請詳述推導過程與法理依據。（完整試題請見紙本試題冊）'
     },
     2: {
       title: '第二題 (50.00分)',
-      content: '範例題目僅供參考'
+      content: '請依相關法規及學說實務見解，詳述本題爭點及法律效果。（完整試題請見紙本試題冊）'
+    },
+    3: {
+      title: '第三題 (50.00分)',
+      content: '請依相關法規及學說實務見解，詳述本題爭點及法律效果。（完整試題請見紙本試題冊）'
     }
   };
 
@@ -33,7 +37,8 @@
   let currentPage = 1;
   let answers = {
     1: createEmptyQuestionPages(),
-    2: createEmptyQuestionPages()
+    2: createEmptyQuestionPages(),
+    3: createEmptyQuestionPages()
   };
 
   let activeTextarea = null;
@@ -151,7 +156,8 @@
     // Start fresh with clean empty exam paper
     answers = {
       1: createEmptyQuestionPages(),
-      2: createEmptyQuestionPages()
+      2: createEmptyQuestionPages(),
+      3: createEmptyQuestionPages()
     };
     renderEditor();
     updateStats();
@@ -178,8 +184,10 @@
     if (db) {
       const transaction = db.transaction(['answers'], 'readwrite');
       const store = transaction.objectStore('answers');
-      store.put({ qId: 1, pages: answers[1] });
-      store.put({ qId: 2, pages: answers[2] });
+      Object.keys(QUESTIONS).forEach(qStr => {
+        const q = Number(qStr);
+        store.put({ qId: q, pages: answers[q] });
+      });
     }
 
     const now = new Date();
@@ -218,7 +226,8 @@
     const timestampStr = now.toLocaleDateString() + ' ' + now.toTimeString().split(' ')[0];
     
     let totalChars = 0;
-    [1, 2].forEach(q => {
+    Object.keys(QUESTIONS).forEach(qStr => {
+      const q = Number(qStr);
       for (let p = 1; p <= 8; p++) {
         totalChars += (answers[q][p] || '').length;
       }
@@ -567,14 +576,106 @@
         if (e.key === 'Backspace') {
           const caret = getCaretPosition(editor);
           if (caret) {
+            const lines = extractPlainText(editor).split('\n');
             const lineDiv = editor.children[caret.lineIndex];
+            const currentLineText = lines[caret.lineIndex] !== undefined ? lines[caret.lineIndex] : (lineDiv ? lineDiv.textContent : '');
+
+            // 1. If currently on a completely empty line:
+            if (currentLineText.trim() === '') {
+              // If it's the first line of the page (lineIndex === 0)
+              if (caret.lineIndex === 0) {
+                if (lines.length > 1) {
+                  // Delete this empty line, pulling following lines up
+                  e.preventDefault();
+                  saveUndoSnapshot();
+                  lines.shift();
+                  const newText = lines.join('\n');
+                  editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+                  answers[currentQ][p] = newText;
+                  setCaretPosition(editor, { lineIndex: 0, offsetWithinLine: 0 });
+                  resequenceDocumentNumbers();
+                  editor.dispatchEvent(new Event('input'));
+                  return;
+                } else if (p > 1) {
+                  // Entire page is empty, move smoothly to previous page
+                  e.preventDefault();
+                  const prevPage = document.getElementById(`paper-page-${p - 1}`);
+                  if (prevPage) {
+                    const prevEditor = prevPage.querySelector('.paper-textarea');
+                    let prevText = extractPlainText(prevEditor);
+                    if (prevText.endsWith('\n')) {
+                      prevText = prevText.slice(0, -1);
+                      prevEditor.innerHTML = renderTextToHTML(prevText, currentQ, p - 1);
+                      answers[currentQ][p - 1] = prevText;
+                    }
+                    prevEditor.focus({ preventScroll: true });
+                    const prevLines = prevText.split('\n');
+                    const lastLine = Math.max(0, prevLines.length - 1);
+                    const lastOffset = prevLines[lastLine] ? prevLines[lastLine].length : 0;
+                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                    if (prevEditor.children[lastLine]) {
+                      prevEditor.children[lastLine].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                    currentPage = p - 1;
+                    if (selectPage) selectPage.value = p - 1;
+                    prevEditor.dispatchEvent(new Event('input'));
+                  }
+                  return;
+                }
+              } else {
+                // Empty line in the middle/end: delete it and move caret to previous line end
+                e.preventDefault();
+                saveUndoSnapshot();
+                const prevLineIdx = caret.lineIndex - 1;
+                const prevLineLen = lines[prevLineIdx] ? lines[prevLineIdx].length : 0;
+                lines.splice(caret.lineIndex, 1);
+                const newText = lines.join('\n');
+                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+                answers[currentQ][p] = newText;
+                setCaretPosition(editor, { lineIndex: prevLineIdx, offsetWithinLine: prevLineLen });
+                resequenceDocumentNumbers();
+                editor.dispatchEvent(new Event('input'));
+                return;
+              }
+            }
+
+            // 2. If at offset 0 of a line, and the PREVIOUS line is completely empty:
+            if (caret.offsetWithinLine === 0 && caret.lineIndex > 0) {
+              if (lines[caret.lineIndex - 1].trim() === '') {
+                e.preventDefault();
+                saveUndoSnapshot();
+                lines.splice(caret.lineIndex - 1, 1);
+                const newText = lines.join('\n');
+                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+                answers[currentQ][p] = newText;
+                setCaretPosition(editor, { lineIndex: caret.lineIndex - 1, offsetWithinLine: 0 });
+                resequenceDocumentNumbers();
+                editor.dispatchEvent(new Event('input'));
+                return;
+              }
+            }
+
+            // 3. Prefix backspace handling (tag or indent spaces):
             if (lineDiv) {
-              const currentLineText = lineDiv.textContent;
               const tag = parseLineNumberTag(currentLineText);
               const spaceMatch = currentLineText.match(/^([　\s]+)/);
               const prefixLen = tag ? tag.rawMatch.length : (spaceMatch ? spaceMatch[1].length : 0);
               
               if (prefixLen > 0 && caret.offsetWithinLine === prefixLen) {
+                // If only prefix exists on this line, clear the prefix cleanly
+                if (currentLineText.length === prefixLen) {
+                  e.preventDefault();
+                  saveUndoSnapshot();
+                  lines[caret.lineIndex] = '';
+                  const newText = lines.join('\n');
+                  editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+                  answers[currentQ][p] = newText;
+                  setCaretPosition(editor, { lineIndex: caret.lineIndex, offsetWithinLine: 0 });
+                  resequenceDocumentNumbers();
+                  editor.dispatchEvent(new Event('input'));
+                  return;
+                }
+
                 e.preventDefault();
                 const selection = window.getSelection();
                 const range = document.createRange();
@@ -641,6 +742,7 @@
               }
             }
 
+            // 4. Backspace at line 0, offset 0 across pages:
             if (caret.lineIndex === 0 && caret.offsetWithinLine === 0) {
               if (p > 1) {
                 e.preventDefault();
@@ -653,21 +755,58 @@
                     prevText = prevText.slice(0, -1);
                     prevEditor.innerHTML = renderTextToHTML(prevText, currentQ, p - 1);
                     answers[currentQ][p - 1] = prevText;
-                    
-                    prevEditor.focus();
-                    const lines = prevText.split('\n');
-                    const lastLine = lines.length > 0 ? lines.length - 1 : 0;
-                    const lastOffset = lines[lastLine] ? lines[lastLine].length : 0;
-                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
-                    
-                    prevEditor.dispatchEvent(new Event('input'));
-                  } else {
-                    prevEditor.focus();
-                    const lastLine = prevEditor.children.length > 0 ? prevEditor.children.length - 1 : 0;
-                    const lastOffset = prevEditor.children[lastLine] ? prevEditor.children[lastLine].textContent.length : 0;
-                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
                   }
+                  
+                  prevEditor.focus({ preventScroll: true });
+                  const prevLines = prevText.split('\n');
+                  const lastLine = Math.max(0, prevLines.length - 1);
+                  const lastOffset = prevLines[lastLine] ? prevLines[lastLine].length : 0;
+                  setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
+                  if (prevEditor.children[lastLine]) {
+                    prevEditor.children[lastLine].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }
+                  currentPage = p - 1;
+                  if (selectPage) selectPage.value = p - 1;
+                  prevEditor.dispatchEvent(new Event('input'));
                 }
+                return;
+              }
+            }
+          }
+        }
+
+        // Delete key handler for deleting empty lines
+        if (e.key === 'Delete') {
+          const caret = getCaretPosition(editor);
+          if (caret) {
+            const lines = extractPlainText(editor).split('\n');
+            const currentLineText = lines[caret.lineIndex] !== undefined ? lines[caret.lineIndex] : '';
+            // If on an empty line: delete it
+            if (currentLineText.trim() === '' && lines.length > 1) {
+              e.preventDefault();
+              saveUndoSnapshot();
+              lines.splice(caret.lineIndex, 1);
+              const newText = lines.join('\n');
+              editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+              answers[currentQ][p] = newText;
+              const targetLine = Math.min(caret.lineIndex, lines.length - 1);
+              setCaretPosition(editor, { lineIndex: targetLine, offsetWithinLine: 0 });
+              resequenceDocumentNumbers();
+              editor.dispatchEvent(new Event('input'));
+              return;
+            }
+            // If at the end of the current line, and the NEXT line is empty: delete that next empty line
+            if (caret.offsetWithinLine === currentLineText.length && caret.lineIndex < lines.length - 1) {
+              if (lines[caret.lineIndex + 1].trim() === '') {
+                e.preventDefault();
+                saveUndoSnapshot();
+                lines.splice(caret.lineIndex + 1, 1);
+                const newText = lines.join('\n');
+                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
+                answers[currentQ][p] = newText;
+                setCaretPosition(editor, { lineIndex: caret.lineIndex, offsetWithinLine: caret.offsetWithinLine });
+                resequenceDocumentNumbers();
+                editor.dispatchEvent(new Event('input'));
                 return;
               }
             }
@@ -759,12 +898,17 @@
             if (nextPage) {
               const nextEditor = nextPage.querySelector('.paper-textarea');
               const nextText = extractPlainText(nextEditor);
-              answers[currentQ][p + 1] = overflowText + nextText;
+              
+              let combinedNext = overflowText + nextText;
+              if (nextText.length === 0 && combinedNext.startsWith('\n')) {
+                combinedNext = combinedNext.replace(/^\n+/, '');
+              }
+              answers[currentQ][p + 1] = combinedNext;
               
               nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1], currentQ, p + 1);
               
               if (originalCaret && originalCaret.lineIndex >= editor.children.length) {
-                nextEditor.focus();
+                nextEditor.focus({ preventScroll: true });
                 setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: overflowText.length > 0 ? 1 : 0 });
               } else {
                 if (originalCaret) setCaretPosition(editor, originalCaret);
@@ -1293,10 +1437,12 @@
     statTotalPages.textContent = maxFilledPage;
 
     let answered = 0;
-    [1, 2].forEach(q => {
+    const totalQCount = Object.keys(QUESTIONS).length;
+    Object.keys(QUESTIONS).forEach(qStr => {
+      const q = Number(qStr);
       let qHasText = false;
       for (let p = 1; p <= 8; p++) {
-        if ((answers[q][p] || '').trim().length > 0) {
+        if ((answers[q] && answers[q][p] || '').trim().length > 0) {
           qHasText = true;
           break;
         }
@@ -1305,12 +1451,13 @@
     });
 
     answeredCountEl.textContent = answered;
-    unansweredCountEl.textContent = 2 - answered;
+    unansweredCountEl.textContent = totalQCount - answered;
   }
 
   // Navigation
   function switchQuestion(newQ) {
-    if (newQ < 1 || newQ > 2) return;
+    const totalQCount = Object.keys(QUESTIONS).length;
+    if (newQ < 1 || newQ > totalQCount) return;
     saveCurrentAnswer(false);
     currentQ = newQ;
     currentPage = 1;
@@ -1323,7 +1470,7 @@
     if (pageEl) {
       pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
       const ta = pageEl.querySelector('.paper-textarea');
-      if (ta) ta.focus();
+      if (ta) ta.focus({ preventScroll: true });
     }
   }
 
@@ -1482,8 +1629,10 @@
     if (!item) return;
     if (confirm(`確定要載入 ${item.timestamp} (${item.type}) 的版本並回到作答區嗎？現有未儲存變更將會被覆蓋。`)) {
       if (item.answers) {
-        answers[1] = normalizeAnswerData(item.answers[1]);
-        answers[2] = normalizeAnswerData(item.answers[2]);
+        Object.keys(QUESTIONS).forEach(qStr => {
+          const q = Number(qStr);
+          answers[q] = normalizeAnswerData(item.answers[q]);
+        });
       }
       saveCurrentAnswer(false);
       renderEditor();
@@ -1613,7 +1762,7 @@
 
     const children = [];
 
-    [1, 2].forEach(q => {
+    Object.keys(QUESTIONS).map(Number).forEach(q => {
       let qHasText = false;
       const qParagraphs = [];
       
@@ -1793,21 +1942,23 @@
 
     btnFinishExam.addEventListener('click', () => {
       let count = 0;
-      [1, 2].forEach(q => {
+      const totalQCount = Object.keys(QUESTIONS).length;
+      Object.keys(QUESTIONS).forEach(qStr => {
+        const q = Number(qStr);
         for (let p = 1; p <= 8; p++) {
-          if ((answers[q][p] || '').trim().length > 0) {
+          if ((answers[q] && answers[q][p] || '').trim().length > 0) {
             count++;
             break;
           }
         }
       });
-      if (confirm(`您目前已完成 ${count} / 2 題。確定要結束作答並交卷嗎？`)) {
+      if (confirm(`您目前已完成 ${count} / ${totalQCount} 題。確定要結束作答並交卷嗎？`)) {
         alert('【成功交卷】感謝使用考選部 CBT 線上模擬作答系統！您可以點擊「匯出 Word 檔」進行備份。接下來系統將為您清空並恢復初始狀態。');
         
-        answers = {
-          1: createEmptyQuestionPages(),
-          2: createEmptyQuestionPages()
-        };
+        answers = {};
+        Object.keys(QUESTIONS).forEach(qStr => {
+          answers[Number(qStr)] = createEmptyQuestionPages();
+        });
         currentQ = 1;
         currentPage = 1;
         
@@ -1853,7 +2004,7 @@
     function renderPagePreviews() {
       pagesGrid.innerHTML = '';
 
-      const qTitleText = currentQ === 1 ? '第一題' : '第二題';
+      const qTitleText = QUESTIONS[currentQ] ? (QUESTIONS[currentQ].title.split(' ')[0] || `第 ${currentQ} 題`) : `第 ${currentQ} 題`;
       if (previewModalTitle) {
         previewModalTitle.textContent = `📖 ${QUESTIONS[currentQ].title} (8 頁) 試卷頁面預覽`;
       }

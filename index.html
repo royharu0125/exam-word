@@ -29,9 +29,9 @@
       </div>
       <div class="info-row highlight-row">
         <span>座號：<strong class="text-red">10100001</strong></span>
-        <span>題數：<strong class="text-red" id="totalQuestionsCount">2</strong></span>
+        <span>題數：<strong class="text-red" id="totalQuestionsCount">3</strong></span>
         <span>已作答題數：<strong class="text-red" id="answeredCount">0</strong></span>
-        <span>未作答題數：<strong class="text-red" id="unansweredCount">2</strong></span>
+        <span>未作答題數：<strong class="text-red" id="unansweredCount">3</strong></span>
         <span class="timer-span">離開考試時間：<strong class="text-red" id="countdownTimer">02:59:59</strong> <small
             class="text-red">(含延長考試時間0分鐘)</small></span>
       </div>
@@ -52,6 +52,7 @@
         <select id="selectQuestion">
           <option value="1">第一題 (50.00分)</option>
           <option value="2">第二題 (50.00分)</option>
+          <option value="3">第三題 (50.00分)</option>
         </select>
         <select id="selectPage">
           <option value="1">第 1 頁</option>
@@ -194,6 +195,7 @@
           style="display: none; padding: 6px 12px; background: #e2e8f0; border-bottom: 1px solid #cbd5e0; gap: 8px;">
           <button class="history-tab-btn active" data-preview-q="1" style="padding: 4px 12px;">第一題</button>
           <button class="history-tab-btn" data-preview-q="2" style="padding: 4px 12px;">第二題</button>
+          <button class="history-tab-btn" data-preview-q="3" style="padding: 4px 12px;">第三題</button>
         </div>
         <div class="preview-content" id="previewContent">（未選擇版本）</div>
         <div class="preview-actions">
