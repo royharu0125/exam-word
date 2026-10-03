@@ -983,12 +983,39 @@
     }
   }
 
+  // Saved selection range (preserved when toolbar buttons are clicked)
+  let savedSelection = null;
+  function saveSelection() {
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0) {
+      savedSelection = sel.getRangeAt(0).cloneRange();
+    }
+  }
+  function restoreSelection() {
+    if (savedSelection && activeTextarea) {
+      activeTextarea.focus();
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelection);
+    }
+  }
+
   // Symbol & Tool Item Toolbar Actions
   function setupSymbolToolbar() {
+    // Prevent ALL toolbar items from stealing focus
+    const allToolbarItems = document.querySelectorAll('.sym-item, .tool-icon');
+    allToolbarItems.forEach(item => {
+      item.addEventListener('mousedown', function (e) {
+        e.preventDefault(); // prevent focus loss from editor
+        saveSelection();
+      });
+    });
+
     const symbolItems = document.querySelectorAll('.sym-item');
     symbolItems.forEach(item => {
       if (item.hasAttribute('data-symbol')) {
         item.addEventListener('click', function () {
+          restoreSelection();
           const symbol = item.getAttribute('data-symbol');
           insertAtCursor(symbol);
         });
@@ -998,6 +1025,7 @@
     const toolCut = document.getElementById('toolCut');
     if (toolCut) {
       toolCut.addEventListener('click', () => {
+        restoreSelection();
         saveUndoSnapshot();
         if (activeTextarea) activeTextarea.focus();
         document.execCommand('cut');
@@ -1007,6 +1035,7 @@
     const toolCopy = document.getElementById('toolCopy');
     if (toolCopy) {
       toolCopy.addEventListener('click', () => {
+        restoreSelection();
         if (activeTextarea) activeTextarea.focus();
         document.execCommand('copy');
       });
@@ -1015,6 +1044,7 @@
     const toolPaste = document.getElementById('toolPaste');
     if (toolPaste) {
       toolPaste.addEventListener('click', async () => {
+        restoreSelection();
         if (!activeTextarea) return;
         saveUndoSnapshot();
         activeTextarea.focus();
@@ -1030,6 +1060,7 @@
     const toolUndo = document.getElementById('toolUndo');
     if (toolUndo) {
       toolUndo.addEventListener('click', () => {
+        restoreSelection();
         performUndo();
       });
     }
@@ -1037,6 +1068,7 @@
     const toolRedo = document.getElementById('toolRedo');
     if (toolRedo) {
       toolRedo.addEventListener('click', () => {
+        restoreSelection();
         performRedo();
       });
     }
@@ -1044,6 +1076,7 @@
     const toolNumbering = document.getElementById('toolNumbering');
     if (toolNumbering) {
       toolNumbering.addEventListener('click', () => {
+        restoreSelection();
         toggleNumberedList();
       });
     }
@@ -1051,6 +1084,7 @@
     const toolPrevLevel = document.getElementById('toolPrevLevel');
     if (toolPrevLevel) {
       toolPrevLevel.addEventListener('click', () => {
+        restoreSelection();
         changeHierarchyLevel(-1); // 上一層 (Promote)
       });
     }
@@ -1058,6 +1092,7 @@
     const toolNextLevel = document.getElementById('toolNextLevel');
     if (toolNextLevel) {
       toolNextLevel.addEventListener('click', () => {
+        restoreSelection();
         changeHierarchyLevel(1); // 下一層 (Demote)
       });
     }
