@@ -597,7 +597,21 @@
     // Word-like cursor: snap cursor to after tag (tag is not editable)
     editor.addEventListener('keydown', function (e) {
 
-      // === ENTER ===
+      // === TAB / SHIFT+TAB: Level Indent / Outdent ===
+      if (e.key === 'Tab') {
+        const details = getActiveLineDetails();
+        if (details) {
+          const { currentLineText } = details;
+          const tag = parseLineNumberTag(currentLineText);
+          if (tag) {
+            e.preventDefault();
+            changeHierarchyLevel(e.shiftKey ? -1 : 1);
+            return;
+          }
+        }
+      }
+
+      // === ENTER: Always generate next number item ===
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         const details = getActiveLineDetails();
         if (!details) return;
@@ -607,24 +621,27 @@
         if (!tag) return; // not a numbered line, let browser handle normally
 
         e.preventDefault();
+        saveUndoSnapshot();
 
-        const textBeforeCursor = currentLineText.substring(0, cursorOffsetInLine);
-        const textAfterCursor = currentLineText.substring(cursorOffsetInLine);
-
-        // If the line is ONLY the tag (no content), remove the tag (like Word)
-        const contentAfterTag = currentLineText.substring(tag.rawMatch.length).trim();
-        if (!contentAfterTag) {
+        // If cursor is at the very beginning (offset 0), insert an empty line above
+        if (cursorOffsetInLine === 0) {
           const newLines = [...lines];
-          newLines[lineIndex] = '';
+          newLines.splice(lineIndex, 0, '');
           const newText = newLines.join('\n');
           editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
           applyHangingIndents(editor);
           answers[currentQ][1] = newText;
           editor.focus();
-          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+          setCaretPosition(editor, { lineIndex: lineIndex + 1, offsetWithinLine: tag.rawMatch.length });
+          resequenceDocumentNumbers();
           editor.dispatchEvent(new Event('input'));
           return;
         }
+
+        // Effective cursor: if inside tag, treat as right after tag
+        const effectiveOffset = Math.max(cursorOffsetInLine, tag.rawMatch.length);
+        const textBeforeCursor = currentLineText.substring(0, effectiveOffset);
+        const textAfterCursor = currentLineText.substring(effectiveOffset);
 
         const nextTag = generateNumberTag(tag.level, tag.num + 1);
 
@@ -656,6 +673,7 @@
         // If cursor is at or before the end of the tag, remove the whole tag
         if (cursorOffsetInLine <= tag.rawMatch.length) {
           e.preventDefault();
+          saveUndoSnapshot();
           const textAfterTag = currentLineText.substring(tag.rawMatch.length);
           const newLines = [...lines];
           newLines[lineIndex] = textAfterTag;
@@ -671,6 +689,31 @@
         }
         // If cursor is after the tag, let browser handle normally (delete one char)
         return;
+      }
+
+      // === DELETE: remove entire tag at once if cursor is before or inside tag ===
+      if (e.key === 'Delete' && !e.isComposing) {
+        const details = getActiveLineDetails();
+        if (!details) return;
+
+        const { lines, lineIndex, currentLineText, cursorOffsetInLine } = details;
+        const tag = parseLineNumberTag(currentLineText);
+        if (tag && cursorOffsetInLine < tag.rawMatch.length) {
+          e.preventDefault();
+          saveUndoSnapshot();
+          const textAfterTag = currentLineText.substring(tag.rawMatch.length);
+          const newLines = [...lines];
+          newLines[lineIndex] = textAfterTag;
+          const newText = newLines.join('\n');
+          editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+          applyHangingIndents(editor);
+          answers[currentQ][1] = newText;
+          editor.focus();
+          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+          resequenceDocumentNumbers();
+          editor.dispatchEvent(new Event('input'));
+          return;
+        }
       }
 
       // === Arrow Left / Home: snap cursor to after tag (don't let cursor enter tag) ===
