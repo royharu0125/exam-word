@@ -401,21 +401,48 @@ body {
 .paper-pages-container {
   display: flex;
   flex-direction: column;
-  gap: 24px;
   width: 100%;
   max-width: 670px;
 }
 
-/* Single Paper Page */
-.paper-page {
-  background-color: #ffffff;
-  border: 3px solid #2b6cb0;
-  border-radius: 2px;
+.exam-editor-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 670px;
+}
+
+.exam-bg-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.paper-page-bg {
+  background-color: #ffffff;
+  border-left: 3px solid #2b6cb0;
+  border-right: 3px solid #2b6cb0;
+  border-top: 3px solid #2b6cb0;
   display: flex;
   position: relative;
-  min-height: 832px; /* 26 lines * 32px */
+  min-height: 832px;
+  max-height: 832px;
   padding: 0;
+}
+
+.paper-page-bg:last-child {
+  border-bottom: 3px solid #2b6cb0;
+}
+
+.paper-page-bg:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #2b6cb0;
+  z-index: 5;
 }
 
 .paper-left-margin {
@@ -467,8 +494,6 @@ body {
 .paper-textarea {
   width: 100%;
   height: 100%;
-  min-height: 832px;
-  max-height: 832px;
   background: transparent;
   border: none;
   outline: none;
@@ -482,6 +507,17 @@ body {
   overflow: hidden;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.single-editor {
+  position: absolute;
+  top: 0;
+  left: 44px;
+  right: 40px;
+  bottom: 0;
+  width: calc(100% - 84px);
+  height: 100%;
+  z-index: 10;
 }
 
 .moex-line {

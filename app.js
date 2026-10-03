@@ -510,484 +510,100 @@
     return changed;
   }
 
-  // Render 8 Paper Pages per Question
+  // Render 8 Paper Pages per Question (Now as a Single Editor Layer over Background Pages)
   function renderEditor() {
     paperPagesContainer.innerHTML = '';
     activeTextarea = null;
 
+    const editorWrapper = document.createElement('div');
+    editorWrapper.className = 'exam-editor-wrapper';
+
+    // The single editor
+    const editor = document.createElement('div');
+    editor.className = 'paper-textarea single-editor';
+    editor.contentEditable = 'true';
+    editor.style.fontSize = `${fontSize}px`;
+    
+    // Combine 8 pages into 1 for display
+    let combinedText = '';
+    for (let p = 1; p <= 8; p++) {
+      if (answers[currentQ] && answers[currentQ][p]) {
+        combinedText += answers[currentQ][p] + '\n';
+      }
+    }
+    combinedText = combinedText.trimEnd();
+
+    if (!combinedText) {
+      editor.setAttribute('data-placeholder', '（請從本頁第 1 行依序開始登記作答內文...）');
+      editor.innerHTML = '<div><br></div>';
+    } else {
+      editor.innerHTML = combinedText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+    }
+
+    editor.addEventListener('focus', function () {
+      activeTextarea = editor;
+      updateToolbarActiveStates();
+    });
+
+    editor.addEventListener('keyup', updateToolbarActiveStates);
+    editor.addEventListener('click', updateToolbarActiveStates);
+    editor.addEventListener('paste', function(e) {
+      e.preventDefault();
+      const text = (e.originalEvent || e).clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+
+    editor.addEventListener('input', function () {
+      if (editor.getAttribute('data-placeholder')) {
+        editor.removeAttribute('data-placeholder');
+      }
+      
+      const plainText = extractPlainText(editor);
+      // Because we still need to store it in answers[currentQ][1..8] for Word Export compatibility
+      // let's just store the whole thing in page 1, and clear pages 2..8
+      answers[currentQ][1] = plainText;
+      for (let p = 2; p <= 8; p++) {
+          answers[currentQ][p] = '';
+      }
+
+      updateStats();
+
+      clearTimeout(autoSaveTimer);
+      updateAutoSaveStatus('saving');
+      autoSaveTimer = setTimeout(() => {
+        saveCurrentAnswer(false);
+        addHistorySnapshot('自動儲存');
+      }, 2500);
+    });
+
+    // Create Background Pages
+    const bgContainer = document.createElement('div');
+    bgContainer.className = 'exam-bg-container';
+    
     for (let p = 1; p <= 8; p++) {
       const page = document.createElement('div');
-      page.className = 'paper-page';
-      page.id = `paper-page-${p}`;
-
+      page.className = 'paper-page-bg';
+      
       const leftMargin = document.createElement('div');
       leftMargin.className = 'paper-left-margin';
       leftMargin.textContent = `第 ${currentQ} 題 第 ${p} 頁`;
-
+      
       const centerArea = document.createElement('div');
       centerArea.className = 'paper-center-area';
-
-      const editor = document.createElement('div');
-      editor.className = 'paper-textarea';
-      editor.contentEditable = 'true';
-      editor.style.fontSize = `${fontSize}px`;
       
-      if (p === 1 && (!answers[currentQ][p] || answers[currentQ][p].trim() === '')) {
-        editor.setAttribute('data-placeholder', '（請從本頁第 1 行依序開始登記作答內文...）');
-      }
-      editor.innerHTML = renderTextToHTML(answers[currentQ][p] || '', currentQ, p);
-
-      editor.addEventListener('focus', function () {
-        activeTextarea = editor;
-        currentPage = p;
-        if (selectPage) selectPage.value = p;
-        updateToolbarActiveStates();
-      });
-
-      editor.addEventListener('keyup', updateToolbarActiveStates);
-      editor.addEventListener('click', updateToolbarActiveStates);
-
-      editor.addEventListener('paste', function(e) {
-        e.preventDefault();
-        const text = (e.originalEvent || e).clipboardData.getData('text/plain');
-        document.execCommand('insertText', false, text);
-      });
-
-      // Keydown Listener for Enter Key Auto-Number Continuation & Soft Break
-      editor.addEventListener('keydown', function (e) {
-        if (e.isComposing || editor.isComposing) return;
-        
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          const details = getActiveLineDetails();
-          if (details) {
-            const tag = parseLineNumberTag(details.currentLineText);
-            if (tag) {
-              changeHierarchyLevel(e.shiftKey ? -1 : 1);
-            } else {
-              if (!e.shiftKey) {
-                document.execCommand('insertText', false, '　　');
-              }
-            }
-          }
-          return;
-        }
-
-        if (e.key === 'Backspace') {
-          const caret = getCaretPosition(editor);
-          if (caret) {
-            const lines = extractPlainText(editor).split('\n');
-            const lineDiv = editor.children[caret.lineIndex];
-            const currentLineText = lines[caret.lineIndex] !== undefined ? lines[caret.lineIndex] : (lineDiv ? lineDiv.textContent : '');
-
-            // 1. If currently on a completely empty line:
-            if (currentLineText.trim() === '') {
-              // If it's the first line of the page (lineIndex === 0)
-              if (caret.lineIndex === 0) {
-                if (lines.length > 1) {
-                  // Delete this empty line, pulling following lines up
-                  e.preventDefault();
-                  saveUndoSnapshot();
-                  lines.shift();
-                  const newText = lines.join('\n');
-                  editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-                  answers[currentQ][p] = newText;
-                  setCaretPosition(editor, { lineIndex: 0, offsetWithinLine: 0 });
-                  resequenceDocumentNumbers();
-                  editor.dispatchEvent(new Event('input'));
-                  return;
-                } else if (p > 1) {
-                  // Entire page is empty, move smoothly to previous page
-                  e.preventDefault();
-                  const prevPage = document.getElementById(`paper-page-${p - 1}`);
-                  if (prevPage) {
-                    const prevEditor = prevPage.querySelector('.paper-textarea');
-                    let prevText = extractPlainText(prevEditor);
-                    if (prevText.endsWith('\n')) {
-                      prevText = prevText.slice(0, -1);
-                      prevEditor.innerHTML = renderTextToHTML(prevText, currentQ, p - 1);
-                      answers[currentQ][p - 1] = prevText;
-                    }
-                    prevEditor.focus({ preventScroll: true });
-                    const prevLines = prevText.split('\n');
-                    const lastLine = Math.max(0, prevLines.length - 1);
-                    const lastOffset = prevLines[lastLine] ? prevLines[lastLine].length : 0;
-                    setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
-                    if (prevEditor.children[lastLine]) {
-                      prevEditor.children[lastLine].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                    currentPage = p - 1;
-                    if (selectPage) selectPage.value = p - 1;
-                    prevEditor.dispatchEvent(new Event('input'));
-                  }
-                  return;
-                }
-              } else {
-                // Empty line in the middle/end: delete it and move caret to previous line end
-                e.preventDefault();
-                saveUndoSnapshot();
-                const prevLineIdx = caret.lineIndex - 1;
-                const prevLineLen = lines[prevLineIdx] ? lines[prevLineIdx].length : 0;
-                lines.splice(caret.lineIndex, 1);
-                const newText = lines.join('\n');
-                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-                answers[currentQ][p] = newText;
-                setCaretPosition(editor, { lineIndex: prevLineIdx, offsetWithinLine: prevLineLen });
-                resequenceDocumentNumbers();
-                editor.dispatchEvent(new Event('input'));
-                return;
-              }
-            }
-
-            // 2. If at offset 0 of a line, and the PREVIOUS line is completely empty:
-            if (caret.offsetWithinLine === 0 && caret.lineIndex > 0) {
-              if (lines[caret.lineIndex - 1].trim() === '') {
-                e.preventDefault();
-                saveUndoSnapshot();
-                lines.splice(caret.lineIndex - 1, 1);
-                const newText = lines.join('\n');
-                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-                answers[currentQ][p] = newText;
-                setCaretPosition(editor, { lineIndex: caret.lineIndex - 1, offsetWithinLine: 0 });
-                resequenceDocumentNumbers();
-                editor.dispatchEvent(new Event('input'));
-                return;
-              }
-            }
-
-            // 3. Prefix backspace handling (tag or indent spaces):
-            if (lineDiv) {
-              const tag = parseLineNumberTag(currentLineText);
-              const spaceMatch = currentLineText.match(/^([　\s]+)/);
-              const prefixLen = tag ? tag.rawMatch.length : (spaceMatch ? spaceMatch[1].length : 0);
-              
-              if (prefixLen > 0 && caret.offsetWithinLine === prefixLen) {
-                // If only prefix exists on this line, clear the prefix cleanly
-                if (currentLineText.length === prefixLen) {
-                  e.preventDefault();
-                  saveUndoSnapshot();
-                  lines[caret.lineIndex] = '';
-                  const newText = lines.join('\n');
-                  editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-                  answers[currentQ][p] = newText;
-                  setCaretPosition(editor, { lineIndex: caret.lineIndex, offsetWithinLine: 0 });
-                  resequenceDocumentNumbers();
-                  editor.dispatchEvent(new Event('input'));
-                  return;
-                }
-
-                e.preventDefault();
-                const selection = window.getSelection();
-                const range = document.createRange();
-                
-                if (caret.lineIndex > 0) {
-                  const prevLineDiv = editor.children[caret.lineIndex - 1];
-                  let prevEndNode = prevLineDiv;
-                  let prevEndOffset = prevLineDiv.childNodes.length;
-                  function findLastTextNode(node) {
-                    if (node.nodeType === 3) return node;
-                    for (let i = node.childNodes.length - 1; i >= 0; i--) {
-                      const textNode = findLastTextNode(node.childNodes[i]);
-                      if (textNode) return textNode;
-                    }
-                    return null;
-                  }
-                  const lastText = findLastTextNode(prevLineDiv);
-                  if (lastText) {
-                    prevEndNode = lastText;
-                    prevEndOffset = lastText.length;
-                  }
-                  range.setStart(prevEndNode, prevEndOffset);
-                } else {
-                  let firstTextNode = lineDiv;
-                  let firstOffset = 0;
-                  function findFirstTextNode(node) {
-                    if (node.nodeType === 3) return node;
-                    for (let i = 0; i < node.childNodes.length; i++) {
-                      const textNode = findFirstTextNode(node.childNodes[i]);
-                      if (textNode) return textNode;
-                    }
-                    return null;
-                  }
-                  const firstText = findFirstTextNode(lineDiv);
-                  if (firstText) {
-                    firstTextNode = firstText;
-                    firstOffset = 0;
-                  }
-                  range.setStart(firstTextNode, firstOffset);
-                }
-                
-                let currentOffset = 0;
-                let endNode = lineDiv;
-                let endNodeOffset = 0;
-                function traverseForEnd(node) {
-                  if (endNode !== lineDiv) return;
-                  if (node.nodeType === 3) {
-                    if (currentOffset + node.length >= prefixLen) {
-                      endNode = node;
-                      endNodeOffset = prefixLen - currentOffset;
-                    }
-                    currentOffset += node.length;
-                  } else {
-                    for (let child of node.childNodes) traverseForEnd(child);
-                  }
-                }
-                traverseForEnd(lineDiv);
-                
-                range.setEnd(endNode, endNodeOffset);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                document.execCommand('delete', false, null);
-                return;
-              }
-            }
-
-            // 4. Backspace at line 0, offset 0 across pages:
-            if (caret.lineIndex === 0 && caret.offsetWithinLine === 0) {
-              if (p > 1) {
-                e.preventDefault();
-                const prevPage = document.getElementById(`paper-page-${p - 1}`);
-                if (prevPage) {
-                  const prevEditor = prevPage.querySelector('.paper-textarea');
-                  let prevText = extractPlainText(prevEditor);
-                  
-                  if (prevText.endsWith('\n')) {
-                    prevText = prevText.slice(0, -1);
-                    prevEditor.innerHTML = renderTextToHTML(prevText, currentQ, p - 1);
-                    answers[currentQ][p - 1] = prevText;
-                  }
-                  
-                  prevEditor.focus({ preventScroll: true });
-                  const prevLines = prevText.split('\n');
-                  const lastLine = Math.max(0, prevLines.length - 1);
-                  const lastOffset = prevLines[lastLine] ? prevLines[lastLine].length : 0;
-                  setCaretPosition(prevEditor, { lineIndex: lastLine, offsetWithinLine: lastOffset });
-                  if (prevEditor.children[lastLine]) {
-                    prevEditor.children[lastLine].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                  }
-                  currentPage = p - 1;
-                  if (selectPage) selectPage.value = p - 1;
-                  prevEditor.dispatchEvent(new Event('input'));
-                }
-                return;
-              }
-            }
-          }
-        }
-
-        // Delete key handler for deleting empty lines
-        if (e.key === 'Delete') {
-          const caret = getCaretPosition(editor);
-          if (caret) {
-            const lines = extractPlainText(editor).split('\n');
-            const currentLineText = lines[caret.lineIndex] !== undefined ? lines[caret.lineIndex] : '';
-            // If on an empty line: delete it
-            if (currentLineText.trim() === '' && lines.length > 1) {
-              e.preventDefault();
-              saveUndoSnapshot();
-              lines.splice(caret.lineIndex, 1);
-              const newText = lines.join('\n');
-              editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-              answers[currentQ][p] = newText;
-              const targetLine = Math.min(caret.lineIndex, lines.length - 1);
-              setCaretPosition(editor, { lineIndex: targetLine, offsetWithinLine: 0 });
-              resequenceDocumentNumbers();
-              editor.dispatchEvent(new Event('input'));
-              return;
-            }
-            // If at the end of the current line, and the NEXT line is empty: delete that next empty line
-            if (caret.offsetWithinLine === currentLineText.length && caret.lineIndex < lines.length - 1) {
-              if (lines[caret.lineIndex + 1].trim() === '') {
-                e.preventDefault();
-                saveUndoSnapshot();
-                lines.splice(caret.lineIndex + 1, 1);
-                const newText = lines.join('\n');
-                editor.innerHTML = renderTextToHTML(newText, currentQ, p);
-                answers[currentQ][p] = newText;
-                setCaretPosition(editor, { lineIndex: caret.lineIndex, offsetWithinLine: caret.offsetWithinLine });
-                resequenceDocumentNumbers();
-                editor.dispatchEvent(new Event('input'));
-                return;
-              }
-            }
-          }
-        }
-
-        if (e.key === 'Enter') {
-          const details = getActiveLineDetails();
-          if (!details) return;
-
-          const { currentLineText } = details;
-          const tag = parseLineNumberTag(currentLineText);
-
-          if (!e.shiftKey) {
-            if (tag) {
-              e.preventDefault();
-              const nextTag = generateNumberTag(tag.level, tag.num + 1);
-              document.execCommand('insertText', false, '\n' + nextTag);
-            } else {
-              // let browser do it
-              setTimeout(() => {
-                editor.dispatchEvent(new Event('input'));
-              }, 0);
-            }
-          } else {
-            e.preventDefault();
-            let indentStr = '';
-            if (tag) {
-              for (let i = 0; i < tag.rawMatch.length; i++) {
-                const char = tag.rawMatch[i];
-                if (char === '　' || char === ' ') {
-                  indentStr += char;
-                } else if (/[一二三四五六七八九十、（）]/.test(char)) {
-                  indentStr += '　';
-                } else {
-                  indentStr += ' ';
-                }
-              }
-            } else {
-              const match = currentLineText.match(/^([　\s]+)/);
-              if (match) {
-                indentStr = match[1];
-              }
-            }
-            document.execCommand('insertText', false, '\n' + indentStr);
-          }
-        }
-      });
-
-      editor.addEventListener('compositionstart', function () {
-        editor.isComposing = true;
-      });
-
-      editor.addEventListener('compositionend', function () {
-        editor.isComposing = false;
-        editor.dispatchEvent(new Event('input'));
-      });
-
-      editor.addEventListener('input', function (e) {
-        if (editor.isComposing) return;
-
-        if (editor.getAttribute('data-placeholder')) {
-          editor.removeAttribute('data-placeholder');
-        }
-        
-        const caretBefore = getCaretPosition(editor);
-        const structureChanged = updateEditorLines(editor, currentQ, p);
-        if (structureChanged && caretBefore) {
-          setCaretPosition(editor, caretBefore);
-        }
-
-        if (editor.clientHeight > 0 && editor.scrollHeight > editor.clientHeight && p < 8) {
-          const originalCaret = getCaretPosition(editor);
-          let plainText = extractPlainText(editor);
-          let overflowText = '';
-          let didOverflow = false;
-          
-          while (editor.scrollHeight > editor.clientHeight && plainText.length > 0) {
-            overflowText = plainText.slice(-1) + overflowText;
-            plainText = plainText.slice(0, -1);
-            editor.innerHTML = renderTextToHTML(plainText, currentQ, p);
-            didOverflow = true;
-          }
-          
-          if (didOverflow) {
-            answers[currentQ][p] = plainText;
-            
-            const nextPage = document.getElementById(`paper-page-${p + 1}`);
-            if (nextPage) {
-              const nextEditor = nextPage.querySelector('.paper-textarea');
-              const nextText = extractPlainText(nextEditor);
-              
-              let combinedNext = overflowText + nextText;
-              if (nextText.length === 0 && combinedNext.startsWith('\n')) {
-                combinedNext = combinedNext.replace(/^\n+/, '');
-              }
-              answers[currentQ][p + 1] = combinedNext;
-              
-              nextEditor.innerHTML = renderTextToHTML(answers[currentQ][p + 1], currentQ, p + 1);
-              
-              if (originalCaret && originalCaret.lineIndex >= editor.children.length) {
-                nextEditor.focus({ preventScroll: true });
-                setCaretPosition(nextEditor, { lineIndex: 0, offsetWithinLine: overflowText.length > 0 ? 1 : 0 });
-              } else {
-                if (originalCaret) setCaretPosition(editor, originalCaret);
-              }
-              
-              nextEditor.dispatchEvent(new Event('input'));
-            }
-          }
-        } else if (editor.clientHeight > 0 && editor.scrollHeight <= editor.clientHeight && p < 8) {
-          const nextPage = document.getElementById(`paper-page-${p + 1}`);
-          if (nextPage) {
-            const nextEditor = nextPage.querySelector('.paper-textarea');
-            let nextText = extractPlainText(nextEditor);
-            
-            if (nextText.length > 0) {
-              let currentText = extractPlainText(editor);
-              const originalCaret = getCaretPosition(editor);
-              
-              let low = 1;
-              let high = nextText.length;
-              let best = 0;
-              
-              while (low <= high) {
-                let mid = Math.floor((low + high) / 2);
-                let testText = currentText + nextText.substring(0, mid);
-                editor.innerHTML = renderTextToHTML(testText, currentQ, p);
-                if (editor.scrollHeight <= editor.clientHeight) {
-                  best = mid;
-                  low = mid + 1;
-                } else {
-                  high = mid - 1;
-                }
-              }
-              
-              if (best > 0) {
-                let pulledText = nextText.substring(0, best);
-                nextText = nextText.substring(best);
-                
-                editor.innerHTML = renderTextToHTML(currentText + pulledText, currentQ, p);
-                nextEditor.innerHTML = renderTextToHTML(nextText, currentQ, p + 1);
-                
-                answers[currentQ][p] = currentText + pulledText;
-                answers[currentQ][p + 1] = nextText;
-                
-                if (originalCaret) setCaretPosition(editor, originalCaret);
-                
-                nextEditor.dispatchEvent(new Event('input'));
-              } else {
-                editor.innerHTML = renderTextToHTML(currentText, currentQ, p);
-                if (originalCaret) setCaretPosition(editor, originalCaret);
-              }
-            }
-          }
-        }
-
-        answers[currentQ][p] = extractPlainText(editor);
-        resequenceDocumentNumbers();
-        updateStats();
-
-        clearTimeout(autoSaveTimer);
-        updateAutoSaveStatus('saving');
-        autoSaveTimer = setTimeout(() => {
-          saveCurrentAnswer(false);
-          addHistorySnapshot('自動儲存');
-        }, 2500);
-      });
-
-      centerArea.appendChild(editor);
-
       const rightMargin = document.createElement('div');
       rightMargin.className = 'paper-right-margin';
       rightMargin.textContent = '（請從本頁第 1 行依序開始登記）';
-
+      
       page.appendChild(leftMargin);
       page.appendChild(centerArea);
       page.appendChild(rightMargin);
-
-      paperPagesContainer.appendChild(page);
+      bgContainer.appendChild(page);
     }
+    
+    editorWrapper.appendChild(bgContainer);
+    editorWrapper.appendChild(editor);
+    paperPagesContainer.appendChild(editorWrapper);
 
     const firstEditor = paperPagesContainer.querySelector('.paper-textarea');
     if (firstEditor) activeTextarea = firstEditor;
