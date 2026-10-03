@@ -510,6 +510,39 @@
     return changed;
   }
 
+  function applyHangingIndents(editor) {
+    let inheritedIndent = 0;
+    Array.from(editor.childNodes).forEach(child => {
+      if (child.nodeType === 3) {
+        // Skip
+      } else if (child.nodeName === 'DIV') {
+        const text = child.textContent;
+        const tag = parseLineNumberTag(text);
+        
+        if (tag) {
+          const w = getTagIndentWidth(tag.rawMatch);
+          child.style.paddingLeft = `${w}px`;
+          child.style.textIndent = `-${w}px`;
+          inheritedIndent = w;
+        } else {
+          const spaceMatch = text.match(/^([　\s]+)/);
+          if (spaceMatch) {
+            const w = getTagIndentWidth(spaceMatch[1]);
+            child.style.paddingLeft = `${w}px`;
+            child.style.textIndent = `-${w}px`;
+            inheritedIndent = w;
+          } else if (inheritedIndent > 0) {
+            child.style.paddingLeft = `${inheritedIndent}px`;
+            child.style.textIndent = '';
+          } else {
+            child.style.paddingLeft = '';
+            child.style.textIndent = '';
+          }
+        }
+      }
+    });
+  }
+
   // Render 8 Paper Pages per Question (Now as a Single Editor Layer over Background Pages)
   function renderEditor() {
     paperPagesContainer.innerHTML = '';
@@ -539,6 +572,8 @@
     } else {
       editor.innerHTML = combinedText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
     }
+    
+    applyHangingIndents(editor);
 
     editor.addEventListener('focus', function () {
       activeTextarea = editor;
@@ -557,6 +592,8 @@
       if (editor.getAttribute('data-placeholder')) {
         editor.removeAttribute('data-placeholder');
       }
+      
+      applyHangingIndents(editor);
       
       const plainText = extractPlainText(editor);
       // Because we still need to store it in answers[currentQ][1..8] for Word Export compatibility
