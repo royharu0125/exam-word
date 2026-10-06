@@ -750,20 +750,26 @@
         // Check if there is typed text after the tag
         const textAfterTag = currentLineText.substring(tag.rawMatch.length);
         if (textAfterTag.trim() === '') {
-          // 標題後面未打字：按 Enter 刪除該標題（不能未打字再開下一個標題）
           e.preventDefault();
-          saveUndoSnapshot();
-          const newLines = [...lines];
-          newLines[lineIndex] = '';
-          const newText = newLines.join('\n');
-          editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
-          applyHangingIndents(editor);
-          answers[currentQ][1] = newText;
-          editor.focus();
-          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
-          resequenceDocumentNumbers();
-          editor.dispatchEvent(new Event('input'));
-          return;
+          if (tag.level > 1) {
+            // 未達最大階層，按 Enter 視為調升上一層 (Promote)，例如 (1) -> 1.，1. -> (一)
+            changeHierarchyLevel(-1);
+            return;
+          } else {
+            // 已經是最大階層 (一)，按 Enter 刪除該標題
+            saveUndoSnapshot();
+            const newLines = [...lines];
+            newLines[lineIndex] = '';
+            const newText = newLines.join('\n');
+            editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+            applyHangingIndents(editor);
+            answers[currentQ][1] = newText;
+            editor.focus();
+            setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+            resequenceDocumentNumbers();
+            editor.dispatchEvent(new Event('input'));
+            return;
+          }
         }
 
         e.preventDefault();
@@ -1031,11 +1037,11 @@
   function generateNumberTag(level, num) {
     switch (level) {
       case 1: return `(${numToChinese(num)})`;
-      case 2: return `　　${num}.`;
-      case 3: return `　　　　(${num})`;
-      case 4: return `　　　　　　${String.fromCharCode(num + 64)}.`;
-      case 5: return `　　　　　　　　${String.fromCharCode(num + 96)}.`;
-      case 6: return `　　　　　　　　　　(${String.fromCharCode(num + 96)})`;
+      case 2: return `　${num}.`;
+      case 3: return `　　(${num})`;
+      case 4: return `　　　${String.fromCharCode(num + 64)}.`;
+      case 5: return `　　　　${String.fromCharCode(num + 96)}.`;
+      case 6: return `　　　　　(${String.fromCharCode(num + 96)})`;
       default: return `(${numToChinese(num)})`;
     }
   }
@@ -1261,6 +1267,23 @@
     if (!existingTag) {
       toggleNumberedList();
       return;
+    }
+
+    // 降低階層時：檢查上方最近的編號行，不可越級跳階（沒有 1. 不能出現 (1)，階層必須照順序）
+    if (direction > 0) {
+      let prevTag = null;
+      for (let i = lineIndex - 1; i >= 0; i--) {
+        if (lines[i].trim() === '') continue;
+        const pt = parseLineNumberTag(lines[i]);
+        if (pt) {
+          prevTag = pt;
+          break;
+        }
+      }
+      const maxAllowedLevel = prevTag ? Math.min(6, prevTag.level + 1) : 1;
+      if (existingTag.level >= maxAllowedLevel) {
+        return; // 不可越級降低階層，只能依序一個一個階層跳
+      }
     }
 
     const oldParentLevel = existingTag.level;
