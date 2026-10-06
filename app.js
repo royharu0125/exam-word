@@ -552,6 +552,111 @@
     });
   }
 
+  // ==========================================================================
+  // Clean Plain Text & Level-aware Copy / Cut / Paste Engine
+  // ==========================================================================
+  function cleanTextFromNumbering(rawText) {
+    if (!rawText) return '';
+    const lines = rawText.split(/\r?\n/);
+    const cleanedLines = lines.map(line => {
+      const tag = parseLineNumberTag(line);
+      if (tag) {
+        return line.substring(tag.rawMatch.length).replace(/^[　\s]+/, '');
+      }
+      return line.replace(/^[　\s]+/, '');
+    });
+    return cleanedLines.join('\n');
+  }
+
+  function getCleanSelectedText() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return '';
+    return cleanTextFromNumbering(sel.toString());
+  }
+
+  function handlePasteText(rawClipboard) {
+    if (!rawClipboard) return;
+    if (!activeTextarea) {
+      activeTextarea = paperPagesContainer.querySelector('.paper-textarea');
+    }
+    if (!activeTextarea) return;
+
+    saveUndoSnapshot();
+    activeTextarea.focus();
+
+    // Clean source text: strip source numbering tags & leading indents
+    const lines = rawClipboard.split(/\r?\n/).map(line => {
+      const tag = parseLineNumberTag(line);
+      if (tag) {
+        return line.substring(tag.rawMatch.length).replace(/^[　\s]+/, '');
+      }
+      return line.replace(/^[　\s]+/, '');
+    });
+
+    const details = getActiveLineDetails();
+    if (!details) {
+      document.execCommand('insertText', false, lines.join('\n'));
+      return;
+    }
+
+    const { currentLineText, lineIndex, cursorOffsetInLine } = details;
+    const currentTag = parseLineNumberTag(currentLineText);
+
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      document.execCommand('delete');
+    }
+
+    // If pasted into a numbered item and multiple lines exist:
+    // "若將多段文字貼上到編號項目內，會依貼上位置的目前階層去建立後續項目；若來源為空白行仍維持為空白項目。"
+    if (currentTag && lines.length > 1) {
+      const allDocLines = extractPlainText(activeTextarea).split('\n');
+      const refreshedDetails = getActiveLineDetails() || details;
+      const refLineText = refreshedDetails.currentLineText;
+      const refOffset = refreshedDetails.cursorOffsetInLine;
+      const refIndex = refreshedDetails.lineIndex;
+
+      const textBeforeCursor = refLineText.substring(0, refOffset);
+      const textAfterCursor = refLineText.substring(refOffset);
+
+      allDocLines[refIndex] = textBeforeCursor + lines[0];
+
+      const insertedLines = [];
+      for (let i = 1; i < lines.length; i++) {
+        const lText = lines[i];
+        if (lText.trim() === '') {
+          insertedLines.push('');
+        } else {
+          const nextTag = generateNumberTag(currentTag.level, currentTag.num + i);
+          insertedLines.push(nextTag + lText);
+        }
+      }
+      if (insertedLines.length > 0) {
+        insertedLines[insertedLines.length - 1] += textAfterCursor;
+      } else {
+        allDocLines[refIndex] += textAfterCursor;
+      }
+
+      allDocLines.splice(refIndex + 1, 0, ...insertedLines);
+      const newDocText = allDocLines.join('\n');
+      activeTextarea.innerHTML = newDocText.split('\n').map(l => `<div>${escapeHTML(l) || '<br>'}</div>`).join('');
+      applyHangingIndents(activeTextarea);
+      answers[currentQ][1] = newDocText;
+
+      const targetLineIdx = refIndex + insertedLines.length;
+      const targetOffset = allDocLines[targetLineIdx].length - textAfterCursor.length;
+      setCaretPosition(activeTextarea, { lineIndex: targetLineIdx, offsetWithinLine: targetOffset });
+
+      resequenceDocumentNumbers();
+      activeTextarea.dispatchEvent(new Event('input'));
+    } else {
+      document.execCommand('insertText', false, lines.join('\n'));
+      setTimeout(() => {
+        resequenceDocumentNumbers();
+      }, 0);
+    }
+  }
+
   // Render 8 Paper Pages per Question (Now as a Single Editor Layer over Background Pages)
   function renderEditor() {
     paperPagesContainer.innerHTML = '';
@@ -592,7 +697,29 @@
     editor.addEventListener('keyup', updateToolbarActiveStates);
     editor.addEventListener('click', updateToolbarActiveStates);
 
-    // Word-like Enter: auto-continue numbered list
+    // Clean plain text Copy / Cut event handlers
+    editor.addEventListener('copy', function (e) {
+      const cleanText = getCleanSelectedText();
+      if (cleanText) {
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', cleanText);
+      }
+    });
+
+    editor.addEventListener('cut', function (e) {
+      const cleanText = getCleanSelectedText();
+      if (cleanText) {
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', cleanText);
+        saveUndoSnapshot();
+        document.execCommand('delete');
+        setTimeout(() => {
+          resequenceDocumentNumbers();
+        }, 0);
+      }
+    });
+
+    // Word-like Enter: auto-continue numbered list, or exit on empty title
     // Word-like Backspace: remove entire tag at once
     // Word-like cursor: snap cursor to after tag (tag is not editable)
     editor.addEventListener('keydown', function (e) {
@@ -611,7 +738,7 @@
         }
       }
 
-      // === ENTER: Always generate next number item ===
+      // === ENTER: Handle numbered list item creation or removal ===
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         const details = getActiveLineDetails();
         if (!details) return;
@@ -619,6 +746,25 @@
         const { lines, lineIndex, currentLineText, cursorOffsetInLine } = details;
         const tag = parseLineNumberTag(currentLineText);
         if (!tag) return; // not a numbered line, let browser handle normally
+
+        // Check if there is typed text after the tag
+        const textAfterTag = currentLineText.substring(tag.rawMatch.length);
+        if (textAfterTag.trim() === '') {
+          // 標題後面未打字：按 Enter 刪除該標題（不能未打字再開下一個標題）
+          e.preventDefault();
+          saveUndoSnapshot();
+          const newLines = [...lines];
+          newLines[lineIndex] = '';
+          const newText = newLines.join('\n');
+          editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+          applyHangingIndents(editor);
+          answers[currentQ][1] = newText;
+          editor.focus();
+          setCaretPosition(editor, { lineIndex: lineIndex, offsetWithinLine: 0 });
+          resequenceDocumentNumbers();
+          editor.dispatchEvent(new Event('input'));
+          return;
+        }
 
         e.preventDefault();
         saveUndoSnapshot();
@@ -641,13 +787,13 @@
         // Effective cursor: if inside tag, treat as right after tag
         const effectiveOffset = Math.max(cursorOffsetInLine, tag.rawMatch.length);
         const textBeforeCursor = currentLineText.substring(0, effectiveOffset);
-        const textAfterCursor = currentLineText.substring(effectiveOffset);
+        const remainingTextAfterCursor = currentLineText.substring(effectiveOffset);
 
         const nextTag = generateNumberTag(tag.level, tag.num + 1);
 
         const newLines = [...lines];
         newLines[lineIndex] = textBeforeCursor;
-        newLines.splice(lineIndex + 1, 0, nextTag + textAfterCursor);
+        newLines.splice(lineIndex + 1, 0, nextTag + remainingTextAfterCursor);
         const newText = newLines.join('\n');
         editor.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
         applyHangingIndents(editor);
@@ -663,6 +809,15 @@
 
       // === BACKSPACE: remove entire tag at once when cursor is at/within tag ===
       if (e.key === 'Backspace' && !e.isComposing) {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) {
+          // 圈選文字狀態：交由瀏覽器正常刪除選取的文字內容，隨後重整序號
+          setTimeout(() => {
+            resequenceDocumentNumbers();
+          }, 0);
+          return;
+        }
+
         const details = getActiveLineDetails();
         if (!details) return;
 
@@ -693,6 +848,15 @@
 
       // === DELETE: remove entire tag at once if cursor is before or inside tag ===
       if (e.key === 'Delete' && !e.isComposing) {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) {
+          // 圈選文字狀態：交由瀏覽器正常刪除選取的文字內容，隨後重整序號
+          setTimeout(() => {
+            resequenceDocumentNumbers();
+          }, 0);
+          return;
+        }
+
         const details = getActiveLineDetails();
         if (!details) return;
 
@@ -729,10 +893,11 @@
         }, 0);
       }
     });
+
     editor.addEventListener('paste', function(e) {
       e.preventDefault();
       const text = (e.originalEvent || e).clipboardData.getData('text/plain');
-      document.execCommand('insertText', false, text);
+      handlePasteText(text);
     });
 
     editor.addEventListener('input', function () {
@@ -1090,7 +1255,7 @@
     const details = getActiveLineDetails();
     if (!details) return;
 
-    const { lines, lineIndex, currentLineText } = details;
+    const { textarea, lines, lineIndex, currentLineText, cursorOffsetInLine } = details;
     const existingTag = parseLineNumberTag(currentLineText);
 
     if (!existingTag) {
@@ -1098,15 +1263,54 @@
       return;
     }
 
-    let newLevel = existingTag.level + direction;
-    if (newLevel < 1) newLevel = 1;
-    if (newLevel > 6) newLevel = 6;
+    const oldParentLevel = existingTag.level;
+    let newParentLevel = oldParentLevel + direction;
+    if (newParentLevel < 1) newParentLevel = 1;
+    if (newParentLevel > 6) newParentLevel = 6;
 
-    const newTag = generateNumberTag(newLevel, 1);
-    const newLineText = currentLineText.replace(existingTag.rawMatch, newTag);
-    const shift = newTag.length - existingTag.rawMatch.length;
+    const delta = newParentLevel - oldParentLevel;
+    if (delta === 0) return; // 已達到最高或最低階層
 
-    applyLineChange(details, newLineText, shift);
+    saveUndoSnapshot();
+
+    // 1. 調整父層階層
+    const parentNewTag = generateNumberTag(newParentLevel, existingTag.num);
+    const parentTextAfterTag = currentLineText.substring(existingTag.rawMatch.length);
+    lines[lineIndex] = parentNewTag + parentTextAfterTag;
+
+    // 2. 子層之連動性（官方規範⑤）：向下尋找所有屬於該項目的子層（level > oldParentLevel），同步調整 delta
+    for (let i = lineIndex + 1; i < lines.length; i++) {
+      const childLine = lines[i];
+      if (childLine.trim() === '') {
+        break; // 空白行中斷
+      }
+      const childTag = parseLineNumberTag(childLine);
+      if (!childTag) {
+        break; // 非編號行中斷
+      }
+      if (childTag.level <= oldParentLevel) {
+        break; // 遇到同階或更淺階層，代表子層範圍結束
+      }
+      // 此行是子層，同步位移階層
+      const childNewLevel = Math.max(1, Math.min(6, childTag.level + delta));
+      const childNewTag = generateNumberTag(childNewLevel, childTag.num);
+      const childTextAfterTag = childLine.substring(childTag.rawMatch.length);
+      lines[i] = childNewTag + childTextAfterTag;
+    }
+
+    const newText = lines.join('\n');
+    textarea.innerHTML = newText.split('\n').map(line => `<div>${escapeHTML(line) || '<br>'}</div>`).join('');
+    applyHangingIndents(textarea);
+    answers[currentQ][1] = newText;
+
+    textarea.focus();
+    const shift = parentNewTag.length - existingTag.rawMatch.length;
+    const newOffset = Math.max(0, cursorOffsetInLine + shift);
+    setCaretPosition(textarea, { lineIndex: lineIndex, offsetWithinLine: newOffset });
+
+    resequenceDocumentNumbers();
+    textarea.dispatchEvent(new Event('input'));
+    updateToolbarActiveStates();
   }
 
   function updateToolbarActiveStates() {
@@ -1164,9 +1368,20 @@
     if (toolCut) {
       toolCut.addEventListener('click', () => {
         restoreSelection();
-        saveUndoSnapshot();
         if (activeTextarea) activeTextarea.focus();
-        document.execCommand('cut');
+        const cleanText = getCleanSelectedText();
+        if (cleanText) {
+          saveUndoSnapshot();
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(cleanText).catch(() => {});
+          }
+          document.execCommand('delete');
+          setTimeout(() => {
+            resequenceDocumentNumbers();
+          }, 0);
+        } else {
+          document.execCommand('cut');
+        }
       });
     }
 
@@ -1175,7 +1390,14 @@
       toolCopy.addEventListener('click', () => {
         restoreSelection();
         if (activeTextarea) activeTextarea.focus();
-        document.execCommand('copy');
+        const cleanText = getCleanSelectedText();
+        if (cleanText) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(cleanText).catch(() => {});
+          }
+        } else {
+          document.execCommand('copy');
+        }
       });
     }
 
@@ -1184,11 +1406,12 @@
       toolPaste.addEventListener('click', async () => {
         restoreSelection();
         if (!activeTextarea) return;
-        saveUndoSnapshot();
-        activeTextarea.focus();
         try {
           const clipText = await navigator.clipboard.readText();
-          if (clipText) insertAtCursor(clipText);
+          if (clipText) {
+            handlePasteText(clipText);
+            return;
+          }
         } catch (e) {
           document.execCommand('paste');
         }
